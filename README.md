@@ -1,5 +1,9 @@
 # Strata Memory（分层记忆）MCP
 
+<p align="center">
+  <img src="./assets/memory.png" alt="Strata Memory 分层记忆 MCP" width="80%">
+</p>
+
 [![PyPI](https://img.shields.io/pypi/v/strata-memory-mcp.svg)](https://pypi.org/project/strata-memory-mcp/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.org)
