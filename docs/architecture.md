@@ -89,12 +89,22 @@ palace/
 - Emotional salience scoring
 - Narrative reframing (third-person perspective)
 
-### Company Mode
-- Multi-tenant Wings per business domain
-- Full AuditLog (Markdown + SQLite)
-- CBT disabled by default
-- PostgreSQL-backed AuditLog on V2 roadmap
-- Private embedding endpoint support
+### Company Mode / 企业模式
+- **Memory Palace 空间化结构**: Wings（业务域）→ Rooms（实体）→ Drawers（记录），对应真实组织结构
+- 多租户严格隔离（Wing + tenant_id 命名空间）
+- 完整操作审计（AuditLog: Markdown + SQLite），每一次 memorize/wake_up/search 均留痕
+- 支持工业场景：MES/WMS 调度状态持久化、产线知识沉淀
+- CBT 默认关闭（可手动开启用于教练 Agent）
+- 全私有部署 + Git 版本控制（Markdown 天然 Git-friendly）
+- PostgreSQL-backed AuditLog + 向量存储（V2 路线图）
+- 私有 BGE-M3 部署端点支持
+
+**V2 企业专属工具**（规划中）:
+
+| Tool | 描述 |
+|------|------|
+| `persist_state` | 设备/产线状态持久化，支持 TTL 过期 |
+| `audit_query` | 结构化审计日志查询，按时间/操作人/目标过滤 |
 
 ## MCP Protocol Surface
 

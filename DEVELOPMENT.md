@@ -89,7 +89,36 @@ strata_memory/
 | `search` | Semantic search with filters |
 | `get_health` | Runtime status and stats (30s cache) |
 
-## Enterprise Deployment
+## Enterprise / Company Mode / 企业模式
 
-For company mode with PostgreSQL, see [docker-compose.yml](docker-compose.yml).
-PostgreSQL-backed AuditLog and vector storage are on the V2 roadmap.
+### Memory Palace Structure / 空间化结构
+
+```
+palace/wings/<tenant>/halls/<hall>/rooms/<room>/drawers/<date>.md
+```
+
+- **Wings / 业务域**: 对应租户或业务部门（如 `factory_001`, `warehouse_east`）
+- **Rooms / 实体**: 具体产线、设备、工位（如 `line-03`, `robot-07`）
+- **Drawers / 记录**: 日期分片的 Markdown 文件，含 YAML frontmatter 元数据
+
+### 多租户隔离
+
+- 每个 tenant 独占一个 Wing，通过 `tenant_id` 严格隔离
+- AuditLog 按 tenant 分段，支持按操作人/时间/目标过滤
+- V2: PostgreSQL RBAC 集成
+
+### 工业场景支持
+
+- **MES 调度状态持久化**: `persist_state()` 记录设备运行状态，TTL 自动过期
+- **WMS 知识沉淀**: 库位优化策略、波次拣货规则以 `procedure` 类记忆长期保存
+- **全私有部署**: 支持 Air-gapped 环境，零外部依赖（嵌入模型可本地部署）
+- **Git 版本控制**: 所有 Markdown 文件天然 Git-friendly，支持变更追溯与回滚
+
+### V2 Enterprise Tools / 规划
+
+| Tool | Purpose |
+|------|---------|
+| `persist_state` | 设备/调度状态持久化，TTL 过期 |
+| `audit_query` | 结构化审计日志查询 |
+
+For Docker deployment, see [docker-compose.yml](docker-compose.yml).

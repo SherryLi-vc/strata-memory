@@ -374,3 +374,28 @@ Returns full system status. Cached for 30 seconds.
 | `wake_up` | `user_id`, `query` | `context_depth`, `limit` | Reads only |
 | `search` | `query`, `user_id` | `limit`, `category`, `from_date`, `to_date`, `context_tags` | Reads only |
 | `get_health` | — | — | Reads only (30s cache) |
+
+---
+
+## V2 Enterprise Tools / 企业工具（规划中）
+
+以下工具为 V2 企业模式专属，当前代码库中尚未实现。
+
+### `persist_state` — 状态持久化（企业）
+
+设备/产线/调度状态持久化，支持 TTL 过期。
+
+```
+persist_state(tenant_id="factory_001", entity="line-03",
+              state={"status": "running", "job": "batch-442"},
+              ttl_seconds=3600)
+```
+
+### `audit_query` — 审计查询（企业）
+
+结构化审计日志查询，按时间/操作人/目标过滤。
+
+```
+audit_query(tenant_id="factory_001", action="memorize",
+            from_date="2026-06-01", agent_id="strata-mcp")
+```
