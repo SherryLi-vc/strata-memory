@@ -1,0 +1,38 @@
+# Strata Memory — Enterprise Deployment (V2 Roadmap)
+#
+# PostgreSQL-backed AuditLog and vector storage are on the V2 roadmap.
+# Currently, company mode uses SQLite for triples/audit and ChromaDB for vectors.
+# Use this compose file as a starting point for V2 enterprise deployments.
+
+version: '3.9'
+
+services:
+  strata-memory:
+    build: .
+    container_name: strata-memory-mcp
+    volumes:
+      - ./palace:/app/palace
+      - ./logs:/app/logs
+    environment:
+      - STRATA_PALACE=/app/palace
+      - STRATA_API_KEY=${STRATA_API_KEY:-}
+    ports:
+      - "8000:8000"  # V2: HTTP transport (current: stdio only)
+    # V2: Uncomment when PostgreSQL backend is available
+    # depends_on:
+    #   - postgres
+
+  # V2: PostgreSQL for AuditLog and vector storage
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: strata_db
+  #     POSTGRES_USER: strata
+  #     POSTGRES_PASSWORD: strata
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   postgres_data:

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "strata-memory": {
+      "command": "uv",
+      "args": ["run", "strata-memory-mcp"]
+    }
+  }
+}
