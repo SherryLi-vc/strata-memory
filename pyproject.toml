@@ -1,14 +1,14 @@
 [project]
 name = "strata-memory-mcp"
-version = "0.2.0"
-description = "A transparent, L0-L3 tiered, Markdown-backed Hybrid Memory system for AI Agents, accessible via MCP."
+version = "2.0.1"
+description = "Industrial AI memory base for Agents via MCP: SQLite SoT, rebuildable vectors, progressive recall, defensive tool contracts."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Vincy", email = "vincy@strata-memory.dev" }]
-keywords = ["mcp", "memory", "agent", "vector", "chromadb", "bge-m3", "semantic-search"]
+keywords = ["mcp", "memory", "agent", "vector", "chromadb", "bge-m3", "sqlite", "semantic-search"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
@@ -40,6 +40,7 @@ enterprise = [
 
 [project.scripts]
 strata-memory-mcp = "strata_memory.__main__:main"
+strata-memory-migrate = "strata_memory.ops.migrate_v02:main"
 
 [project.urls]
 Homepage = "https://github.com/vincy/strata-memory"

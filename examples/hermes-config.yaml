@@ -1,28 +1,21 @@
-# Strata Memory MCP — Hermes Integration
+# Hermes MCP config snippet for Strata Memory 2.0
+#
+# 1) Put the FULL SiliconFlow key in ~/.hermes/.env (recommended):
+#      STRATA_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#    Do NOT use OpenClaw redacted form sk-xxx...yyy
+#
+# 2) Install wrapper:
+#      cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh
+#      chmod +x ~/.hermes/scripts/strata-wrapper.sh
+#
+# 3) Merge into ~/.hermes/config.yaml under mcp_servers:
 
-Add to `~/.hermes/config.yaml` under `mcp_servers:`:
-
-```yaml
 mcp_servers:
   strata-memory:
-    command: uv
-    args:
-      - run
-      - strata-memory-mcp
+    enabled: true
+    command: /Users/vizhangkk/.hermes/scripts/strata-wrapper.sh
+    # optional explicit env (prefer ~/.hermes/.env over hardcoding secrets here)
+    # env:
+    #   STRATA_API_KEY: sk-...
+    #   STRATA_PALACE: /Users/vizhangkk/.strata/palace
     timeout: 120
-```
-
-Or if installed via PyPI:
-
-```yaml
-mcp_servers:
-  strata-memory:
-    command: strata-memory-mcp
-    timeout: 120
-```
-
-After adding, restart Hermes:
-
-```bash
-hermes gateway restart
-```

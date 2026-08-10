@@ -1,93 +1,152 @@
-"""Optional CLI entry point for Strata Memory.
+"""CLI for Strata Memory 2.0.
 
 Usage:
-    python -m strata_memory.cli init    # Interactive init wizard (fallback)
-    python -m strata_memory.cli health  # Print system health
-    python -m strata_memory.cli serve   # Start MCP server (same as __main__)
-
-For Agent-Driven onboarding, use the MCP tools via your Agent:
-    get_system_profile()
-    search_embedding_recommendations()
-    apply_memory_config()
+    python -m strata_memory.cli init
+    python -m strata_memory.cli doctor
+    python -m strata_memory.cli stats
+    python -m strata_memory.cli digest [--apply]
+    python -m strata_memory.cli project
+    python -m strata_memory.cli migrate [--apply] [--palace PATH] ...
+    python -m strata_memory.cli serve
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import sys
+from pathlib import Path
 
 
 def cmd_init() -> None:
-    """Minimal CLI init — the Agent-Driven path is preferred."""
-    print("Strata Memory — CLI Setup (fallback)")
+    print("Strata Memory 2.0 — CLI init")
     print("=" * 40)
-    print()
-    print("For the best experience, let your AI Agent handle setup via MCP tools:")
-    print("  get_system_profile()")
-    print("  search_embedding_recommendations()")
-    print("  apply_memory_config(...)")
-    print()
-    print("Or use this CLI fallback:")
-    print()
     mode = input("Mode [personal/company] (default: personal): ").strip() or "personal"
-    provider = input("Embedding provider (default: siliconflow): ").strip() or "siliconflow"
-    model = input("Model (default: BAAI/bge-m3): ").strip() or "BAAI/bge-m3"
-    api_key = input("API key: ").strip()
+    tenant_id = ""
+    if mode == "company":
+        tenant_id = input("tenant_id: ").strip()
+    api_key = input("API key (or leave empty and use STRATA_API_KEY): ").strip()
+    if api_key:
+        os.environ["STRATA_API_KEY"] = api_key
 
-    from .tools.system_profile import apply_memory_config
-    result = apply_memory_config({
+    from .config import Config, ensure_palace, save_config, truth_db_path
+    from .storage.truth_store import TruthStore
+
+    palace_path = os.environ.get("STRATA_PALACE") or str(Path.home() / ".strata" / "palace")
+    cfg = Config(
+        mode=mode,
+        tenant_id=tenant_id,
+        palace_path=palace_path,
+        version="2.0.0",
+        embedding={"api_key": api_key or os.environ.get("STRATA_API_KEY", "")},
+        cbt={
+            "enabled": mode == "personal",
+            "mode": "passive" if mode == "personal" else "off",
+        },
+        audit={"enabled": mode == "company", "log_to_db": True},
+    )
+    palace = Path(palace_path)
+    ensure_palace(palace)
+    save_config(cfg)
+    TruthStore(truth_db_path(palace))
+    print(json.dumps({
+        "status": "ok",
+        "version": "2.0.0",
+        "palace": palace_path,
+        "truth_db": str(truth_db_path(palace)),
         "mode": mode,
-        "provider": provider,
-        "model": model,
-        "api_key": api_key,
-    })
-    print()
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    }, indent=2))
 
 
-def cmd_health() -> None:
-    """Print system health from config."""
-    from .config import is_initialized, load_config
-    from .tools.system_profile import get_system_profile
+def cmd_doctor() -> None:
+    from .config import load_config, truth_db_path
+    from .ops.doctor import strata_doctor
+    from .storage.chroma import ChromaStore
+    from .storage.truth_store import TruthStore
 
-    print("=== System Profile ===")
-    print(json.dumps(get_system_profile(), indent=2))
-    print()
-    if is_initialized():
-        cfg = load_config()
-        print("=== Strata Config ===")
-        print(f"  Mode:     {cfg.mode}")
-        print(f"  Palace:   {cfg.palace_path}")
-        print(f"  Provider: {cfg.embedding.provider}/{cfg.embedding.model}")
-        print(f"  CBT:      {cfg.cbt.mode}")
-        print(f"  Audit:    {'enabled' if cfg.audit.enabled else 'markdown-only'}")
-    else:
-        print("Strata Memory not initialized. Run `python -m strata_memory.cli init`.")
+    cfg = load_config()
+    store = TruthStore(truth_db_path(Path(cfg.palace_path)))
+    chroma = ChromaStore(Path(cfg.palace_path) / "l2_vector")
+    print(json.dumps(strata_doctor(config=cfg, store=store, chroma=chroma), indent=2, ensure_ascii=False))
+
+
+def cmd_stats() -> None:
+    from .config import load_config, truth_db_path
+    from .ops.stats import strata_stats
+    from .storage.chroma import ChromaStore
+    from .storage.truth_store import TruthStore
+
+    cfg = load_config()
+    store = TruthStore(truth_db_path(Path(cfg.palace_path)))
+    chroma = ChromaStore(Path(cfg.palace_path) / "l2_vector")
+    print(json.dumps(strata_stats(config=cfg, store=store, chroma=chroma), indent=2, ensure_ascii=False))
+
+
+def cmd_digest() -> None:
+    from .config import load_config, truth_db_path
+    from .pipeline.digest import run_digest
+    from .storage.truth_store import TruthStore
+
+    apply = "--apply" in sys.argv
+    cfg = load_config()
+    store = TruthStore(truth_db_path(Path(cfg.palace_path)))
+    print(json.dumps(run_digest(store, cfg, dry_run=not apply), indent=2, ensure_ascii=False))
+
+
+def cmd_project() -> None:
+    from .config import load_config, truth_db_path
+    from .ops.projection import dump_markdown_projection
+    from .storage.truth_store import TruthStore
+
+    cfg = load_config()
+    store = TruthStore(truth_db_path(Path(cfg.palace_path)))
+    print(json.dumps(
+        dump_markdown_projection(store, Path(cfg.palace_path)),
+        indent=2,
+        ensure_ascii=False,
+    ))
+
+
+def cmd_migrate() -> None:
+    """Migrate 0.2 Markdown drawers → 2.0 SQLite. Forwards argv to migrate_v02."""
+    from .ops.migrate_v02 import main as migrate_main
+
+    # Drop "migrate" so argparse sees only its own flags
+    code = migrate_main(sys.argv[2:])
+    sys.exit(code)
 
 
 def cmd_serve() -> None:
-    """Start the MCP server."""
-    import asyncio
     from .server import run
     asyncio.run(run())
 
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: python -m strata_memory.cli {init|health|serve}")
+        print(
+            "Usage: python -m strata_memory.cli "
+            "{init|doctor|stats|digest|project|migrate|serve}"
+        )
         sys.exit(1)
-
     cmd = sys.argv[1]
-    if cmd == "init":
-        cmd_init()
-    elif cmd == "health":
-        cmd_health()
-    elif cmd == "serve":
-        cmd_serve()
-    else:
+    handlers = {
+        "init": cmd_init,
+        "doctor": cmd_doctor,
+        "stats": cmd_stats,
+        "digest": cmd_digest,
+        "project": cmd_project,
+        "migrate": cmd_migrate,
+        "serve": cmd_serve,
+    }
+    if cmd not in handlers:
         print(f"Unknown command: {cmd}")
-        print("Usage: python -m strata_memory.cli {init|health|serve}")
+        print(
+            "Usage: python -m strata_memory.cli "
+            "{init|doctor|stats|digest|project|migrate|serve}"
+        )
         sys.exit(1)
+    handlers[cmd]()
 
 
 if __name__ == "__main__":

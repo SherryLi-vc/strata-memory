@@ -1,4 +1,7 @@
-"""Strata Memory — A transparent, L0-L3 tiered, Markdown-backed Hybrid Memory MCP.
-v0.2.0: Dual-mode (personal/company), psych-validated scoring, CBT safety, audit logging.
+"""Strata Memory 2.0 — Industrial AI Memory Base (MCP).
+
+SQLite Single Source of Truth · Rebuildable vector index · Markdown projection.
+LLM decides; deterministic code executes.
 """
-__version__ = "0.2.0"
+
+__version__ = "2.0.1"

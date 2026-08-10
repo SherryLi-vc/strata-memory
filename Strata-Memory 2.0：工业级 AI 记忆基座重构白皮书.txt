@@ -1,0 +1,108 @@
+核心设计哲学：大模型只做决策，确定性代码接管一切
+绝不能用管理人类文本的思维去管理 Agent 的记忆。系统必须坚守“双重同理心”：底层数据对机器绝对严谨（SQLite），表层映射对人类绝对友好（Markdown）。
+
+第一战役：底层存储范式革命 (Storage Paradigm Shift)
+痛点：当前用 Markdown+YAML 做 Truth Store（真相源），容易被 LLM 篡改，且与向量库极易产生状态撕裂。
+架构师重构指令：
+
+确立单一事实来源 (Single Source of Truth)：强制将 SQLite（单机）或 PostgreSQL（企业多租户）作为绝对权威的数据层。
+
+Markdown 降级为“只读投影” (Read-Only Projection)：Markdown 不再是数据库，而是由 SQLite 动态生成的“视图（View）”。通过 MCP 的 Resources 接口暴露给 LLM 或人类查看。人类在界面的修改，必须通过 Git-diff 风格的解析器反向写入 SQLite。
+
+重建级容灾 (Rebuildable Companion)：ChromaDB/BGE-M3 向量库和知识图谱被降级为“可随时销毁重建的索引层”。当遭遇污染时，系统可以一键从 SQLite 原生记录全量重建向量。
+
+第二战役：防弹写入与质量门 (Write-Time Governance & Bulletproof Schema)
+痛点：缺乏写入干预，LLM 的幻觉和垃圾信息会直接污染记忆库。
+架构师重构指令：
+
+剥夺 LLM 的裸写权限：将底层的 CRUD 接口隐藏。MCP 暴露的工具必须自带“质量内核（Quality Kernel）”。
+
+强制元数据注入 (Deterministic Metadata)：当 LLM 调用 commit_memory 时，确定性 Python 代码必须拦截请求，并自动计算/注入：哈希去重、新鲜度 (Freshness)、默认 TTL（生命周期）。
+
+终极防御契约 (Tool Schema)：融合你朋友的分类建议，MCP Tool 必须长这样：
+
+JSON
+{
+  "name": "commit_memory",
+  "description": "作用：将萃取后的高价值事实持久化。\n触发：跨多轮对话发现的客观事实、用户显式偏好或操作规程。\n禁忌：拒绝写入临时情绪、假设推演、密码凭证。严禁写入未经确认的推测。",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "memory_type": {
+        "type": "string",
+        "enum": ["factual_truth", "user_preference", "procedure_rule", "episodic_event"],
+        "description": "严格界定记忆类型，系统将据此自动分配 TTL 和权重。"
+      },
+      "fact_claim": {
+        "type": "string",
+        "description": "高度压缩的第三人称事实陈述，禁止模糊时间（如'刚才'）。"
+      },
+      "confidence_score": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 1.0,
+        "description": "LLM 对该事实真实性的自我评估置信度。"
+      }
+    },
+    "required": ["memory_type", "fact_claim", "confidence_score"]
+  }
+}
+第三战役：作用域隔离与 Token 极简主义 (Scope Isolation & Token Minimalism)
+痛点：缺乏真正的多租户/多会话物理隔离，容易引发跨话题的上下文污染（Token 爆炸）。
+架构师重构指令：
+
+严格的三维坐标系 (Principal Isolation)：所有的记忆主键必须包含 [Tenant_ID] + [User_ID] + [Session_ID]。
+
+Scratch 与 Durable 分离：当前会话（Session）的记忆放入内存级的 Scratch Buffer（暂存区）；只有经过总结和验证的内容，才能在会话结束时晋升（Promote）到 L0/L1 的 Durable 层。
+
+渐进式召回 (Progressive Recall Funnel)：检索时采用 Hybrid RRF（语义 + FTS），但绝对禁止将命中的完整 Markdown 直接塞给大模型。只提供 <ID, 摘要, 相关度>。如果大模型判断需要深度细节，需调用 expand_memory_detail(id) 二次获取。
+
+第四战役：防御性 CBT 引擎与生命周期 (CBT Engine & Lifecycle)
+痛点：把心理安全交给了 LLM 的“自觉性”，且记忆缺乏遗忘衰减机制。
+架构师重构指令：
+
+CBT 规则引擎下沉：将负面图式（Schema）检测、敏感信息打码（Redaction）写成纯 Python/Rust 的中间件（Middleware）。在 LLM 调用写入 Tool 时，中间件直接拦截并抛出错误引导（如上一版提到的异常反馈重塑），甚至强制触发 48 小时冷却沙盒。
+
+基于 CRON 的后台遗忘 (Background Forgetting)：不要让大模型在对话时去思考“要不要删除旧记忆”。通过夜间后台任务（Digest Job），根据使用频率（Usage）和 TTL，自动将 L1 降级到 L2，或将冲突的旧事实归档（Archive 而不是物理删除）。
+
+第五战役：生产级运维与监控 (Observability & Ops)
+痛点：缺乏自检机制，系统状态黑盒化。
+架构师重构指令：
+针对开发者和运维，增加纯系统层面的 MCP 工具（非对话用）：
+
+strata_doctor: 一键巡检数据库与向量库的一致性（类似 git fsck）。
+
+strata_rebuild_index: 清空并从 SQLite 全量重建 BGE 向量索引。
+
+strata_stats: 打印当前 L0-L3 各层级的 Token 负载水位线，预防上下文溢出风险。
+
+🎯 落地执行路线图 (Actionable Roadmap)
+如果你或你的团队要操刀重构，请严格按照以下优先级执行，避免陷入“重构黑洞”：
+
+Phase 1: 止血与筑基（1-2周）
+
+做减法：删掉 get_system_profile 等非核心探测工具。
+
+换底座：引入 SQLite，将原有的 Markdown 读写逻辑全部改为向 SQLite 读写，Markdown 改为通过脚本每天定时 dump 出来的只读快照。
+
+锁契约：按照三段式（作用/触发/禁忌）重写 commit_memory 和 recall_context 的 MCP Schema。
+
+Phase 2: 写时治理与隔离（2-3周）
+
+引入 Metadata 拦截器（校验置信度、去重、分类）。
+
+强制所有 API 请求必须携带 user_id 和 session_id，实现基础的 Scope 隔离。
+
+实现 CBT 拦截中间件（Regex / 轻量判别模型），对负面情绪执行强制拦截。
+
+Phase 3: 检索增强与生命周期（延后优化）
+
+引入 Hybrid RRF（BM25 + 向量）。
+
+开发夜间批量处理脚本（Cron Job），实现记忆的降级（Demotion）和合并摘要。
+
+完善 doctor 和运维监控工具。
+
+总结：
+Strata-Memory 现有的 L0-L3分层理论、CBT心理安全 和 Memory Palace 空间隐喻 具有极高的护城河价值。但它需要褪去“原型玩具”的外衣。
+将 SQLite 作为钢铁骨架，把 MCP Schema 当作法律契约，将 Markdown 作为人类观赏的皮肤。 按照这份蓝图重构，它完全有潜力成为 GitHub 上超越 Mem0 和 Scope-Recall 的下一代企业级/个人双栖 AI 记忆标杆。

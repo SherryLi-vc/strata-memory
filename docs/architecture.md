@@ -1,135 +1,107 @@
-# Strata Memory — Architecture
+# Strata Memory 2.0 — Architecture
 
-## Overview
+## Design laws
 
-Strata Memory is an L0-L3 tiered hybrid memory system for AI Agents, exposed via the Model Context Protocol (MCP). It models human memory as geological strata with category-specific decay rates and psych-validated scoring.
+1. **LLM decides; deterministic code executes.**
+2. **SQLite is the only Source of Truth.**
+3. **Vector DB and Markdown are companions / projections — rebuildable.**
+4. **Tool descriptions are legal contracts** (作用 / 触发 / 禁忌).
+5. **Progressive disclosure** — never dump full corpus into context.
 
-## Memory Tiers
-
-| Tier | Name | Storage | Purpose | Token Budget |
-|------|------|---------|---------|-------------|
-| L0 | Core | Markdown profile | Permanent decontextualized facts, procedures | 2000 |
-| L1 | Diary | Markdown files | Recent N days of CBT-reframed narratives | 4000 |
-| L2 | Semantic | ChromaDB | Vector search with BGE-M3 (384-dim) | 6000 |
-| L3 | Cold | Markdown archive | Demoted memories (Inhibitory Control) | — |
-
-## Scoring Formula
-
-```
-final_score = base_importance
-            × (1 + log₂(1 + usage_count) × 0.3)
-            × e^emotional_salience
-            × decay_rate^days
-```
-
-## Category-Specific Decay Rates
-
-| Category | Rate | Behavior |
-|----------|------|----------|
-| event | 0.85 | Fades fastest (episodic) |
-| lesson | 0.90 | Learned lessons |
-| fact | 0.93 | General facts |
-| relationship | 0.92 | Social information |
-| preference | 0.95 | Tastes, preferences |
-| goal | 0.96 | Active goals persist |
-| procedure | 0.98 | Procedural knowledge, very stable |
-| core_identity | 1.00 | Anchor exemption, no decay |
-
-## Data Flow
-
-```
-memorize(content)
-  → estimate_emotional_salience() (pipeline/scoring.py)       — keyword screening
-  → detect_distortions() (safety/)                             — CBT check
-  → write_drawer() (storage/markdown.py)                       — physical Markdown + YAML
-  → embed() (embedding/)                                       — BGE-M3 384-dim vector
-  → chroma.add() (storage/chroma.py)                           — vector index
-  → auditor.log_memorize() (audit/ — called from server.py)    — audit trail
-
-  V2: triples.upsert() (storage/triples.py)                    — semantic network
-  V2: compute_score() for automated promotion/demotion
-
-wake_up(query)
-  → read_l0_profile() (storage/markdown.py)                    — permanent context
-  → read_l1_diary() (storage/markdown.py)                      — recent N days
-  → embed(query) (embedding/)                                   — semantic vector
-  → chroma.query() (storage/chroma.py)                          — L2 search
-  → CBT defusion if negative schema (pipeline/wake.py)         — safety reframing
-  → format as flat Markdown                                    — context string
-  → auditor.log_wake_up() (audit/ — called from server.py)     — audit trail
-
-search(query)
-  → embed(query) (embedding/)                                   — semantic vector
-  → chroma.query() + filters (storage/chroma.py)               — filtered search
-  → auditor.log_search() (audit/ — called from server.py)      — audit trail
-```
-
-## Palace Structure (Filesystem)
+## Storage stack
 
 ```
 palace/
-├── wings/
-│   ├── users/<user_id>/<room>/<date>.md    # Personal mode
-│   └── <tenant>/halls/<hall>/rooms/<room>/drawers/<date>.md  # Company mode
-├── l0_profile/<wing>/profile.md
-├── l1_diary/<wing>/<date>.md
-├── l2_vector/                               # ChromaDB
-├── l3_cold/
-├── audit_logs/<date>.md
-├── metadata_db/triples.db                   # SQLite
+├── config.json                 # mode, budgets, embedding (no full api_key)
+├── truth/
+│   └── strata.db               # SoT: memories, audit_log, trajectory, FTS5
+├── l2_vector/                  # Chroma companion (deletable)
+├── projection/                 # read-only Markdown dump
+├── audit_logs/                 # optional human Markdown audit
 └── system/
-    └── onboarding_complete.md
 ```
 
-## Dual Mode
+### memories table (core fields)
 
-### Personal Mode
-- CBT cognitive distortion detection (catastrophizing, black-and-white thinking, etc.)
-- 48h cooling-off: negative schemas held in L3 before L0 promotion
-- Emotional salience scoring
-- Narrative reframing (third-person perspective)
+| Field | Role |
+|-------|------|
+| id | Opaque memory id |
+| tenant_id, user_id, session_id | 3-axis isolation |
+| memory_type | factual_truth / user_preference / procedure_rule / episodic_event |
+| fact_claim / summary / detail | claim + progressive fields |
+| content_hash | dedup |
+| layer | L0 / L1 / L2 / L3 / scratch |
+| confidence, importance, emotional_salience | scoring inputs |
+| ttl_seconds, expires_at | lifecycle |
+| is_negative_schema, is_scratch | safety / buffer flags |
 
-### Company Mode / 企业模式
-- **Memory Palace 空间化结构**: Wings（业务域）→ Rooms（实体）→ Drawers（记录），对应真实组织结构
-- 多租户严格隔离（Wing + tenant_id 命名空间）
-- 完整操作审计（AuditLog: Markdown + SQLite），每一次 memorize/wake_up/search 均留痕
-- 支持工业场景：MES/WMS 调度状态持久化、产线知识沉淀
-- CBT 默认关闭（可手动开启用于教练 Agent）
-- 全私有部署 + Git 版本控制（Markdown 天然 Git-friendly）
-- PostgreSQL-backed AuditLog + 向量存储（V2 路线图）
-- 私有 BGE-M3 部署端点支持
+## Write path
 
-**V2 企业专属工具**（规划中）:
+```
+commit_memory
+  → QualityKernel.validate (type, length, secrets, fuzzy time, speculation)
+  → CBTMiddleware.assess (distortions + redaction)
+  → TruthStore.find_by_hash (dedup → touch)
+  → TruthStore.insert_memory (TTL/layer deterministic)
+  → embed + Chroma.upsert (best-effort; failure does not roll back SoT)
+  → audit + trajectory
+```
 
-| Tool | 描述 |
-|------|------|
-| `persist_state` | 设备/产线状态持久化，支持 TTL 过期 |
-| `audit_query` | 结构化审计日志查询，按时间/操作人/目标过滤 |
+## Read path
 
-## MCP Protocol Surface
+```
+recall_context
+  → L0 cards (token budget)
+  → session scratch cards
+  → Hybrid RRF: Chroma vector ranks ⊕ FTS5 ranks
+  → return [{id, summary, score, layer, type}]  ONLY
 
-### Tools (8)
-| Tool | Side Effects |
-|------|-------------|
-| get_system_profile | None (read) |
-| search_embedding_recommendations | None (read) |
-| apply_memory_config | Writes config, inits Palace |
-| strata_init | Writes config, inits Palace |
-| memorize | Writes drawer + vector + triples + audit |
-| wake_up | Reads only (L0+L1+L2) |
-| search | Reads only (L2 semantic) |
-| get_health | Reads only (30s cache) |
+expand_memory_detail(id)
+  → scope check (user_id + tenant_id)
+  → full detail (cap 4000 chars) + CBT defusion if needed
+```
 
-### Resources (5)
-- `strata://onboarding/steps.md` — Manual setup guide
-- `strata://memory/setup-instructions.md` — Agent-Driven setup guide
-- `strata://stats` — System statistics
-- `strata://wings` — Wing directory
-- `strata://audit/logs` — Audit trail (init-only)
+## Hybrid RRF
 
-## Security
+```
+score(d) = Σ 1 / (k + rank_i(d) + 1)   for each ranked list i
+k = 60 (standard)
+```
 
-- Path traversal: `drawer_path()` sanitizes segments + `.resolve()` sandbox
-- SQL injection: all queries parameterized; dynamic values type-validated and clamped
-- API key: `exclude=True` from serialization; `STRATA_API_KEY` env var
-- Multi-tenant isolation: Wings + tenant_id namespace separation
+Lists: vector similarity order, FTS5 bm25 order. Missing branch → empty list (graceful).
+
+## CBT & cooling
+
+- Pure Python regex middleware (not LLM conscience)
+- Negative schema → force scratch + block L0
+- Passive recall: defusion frame; active: hide negatives
+
+## Lifecycle (digest job)
+
+- TTL expired → `archive` (Inhibitory Control — no hard delete)
+- Low score / long unaccessed → demote L3 or archive
+- Run via `strata_digest` (prefer dry_run first) or cron
+
+## Ops
+
+| Tool | Purpose |
+|------|---------|
+| strata_doctor | SoT vs index health |
+| strata_rebuild_index | wipe vectors, re-embed from SQLite |
+| strata_stats | waterlines + trajectory |
+| strata_project | Markdown views |
+
+## Dual mode
+
+| | personal | company |
+|--|----------|---------|
+| CBT | on (passive) | off by default |
+| tenant_id | optional | required at init |
+| audit | SQLite always | SQLite + emphasis |
+
+## Security red lines
+
+- No plaintext API keys in config.json
+- No cross-principal expand
+- Destructive index rebuild requires `confirm=true`
+- Secrets never enter SoT (Quality Kernel + redaction)

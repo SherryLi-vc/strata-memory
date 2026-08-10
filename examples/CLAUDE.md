@@ -1,29 +1,21 @@
-# Strata Memory MCP — Claude Desktop Integration
+# Strata Memory 2.0 — Claude Desktop / Agent notes
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+## Env
 
-```json
-{
-  "mcpServers": {
-    "strata-memory": {
-      "command": "uv",
-      "args": ["run", "strata-memory-mcp"]
-    }
-  }
-}
-```
+- `STRATA_API_KEY` — embedding provider key (preferred over tool args)
+- `STRATA_PALACE` — data root (default `~/.strata/palace`)
 
-Or with full Python path:
+## Tool flow
 
-```json
-{
-  "mcpServers": {
-    "strata-memory": {
-      "command": "python3",
-      "args": ["-m", "strata_memory"]
-    }
-  }
-}
-```
+1. `strata_init(mode="personal")` once
+2. `strata_doctor()` self-check
+3. Session start: `recall_context(user_id, query)`
+4. Need detail: `expand_memory_detail(user_id, memory_id)`
+5. Persist fact: `commit_memory(user_id, memory_type, fact_claim, confidence_score)`
+6. End of session: `promote_session(user_id, session_id)` if scratch was used
 
-Restart Claude Desktop after making changes.
+## Never
+
+- Write secrets into memory
+- Use relative time in fact_claim
+- Dump full search results into the prompt — expand selectively

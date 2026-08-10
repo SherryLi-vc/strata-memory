@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.2.x   | ✅ |
+| 2.0.x   | ✅ |
+| 0.2.x   | ⚠️ security fixes only |
 
 ## Reporting a Vulnerability
 
@@ -17,22 +18,31 @@ If you discover a security issue, please report it privately:
 
 Please do NOT open a public issue for security vulnerabilities.
 
-## Security Design
+## Security Design (2.0)
 
-- **Local-first**: All data stored locally; zero external uploads
-- **Path traversal protection**: `drawer_path()` validates all paths stay inside the Palace directory
-- **SQL injection hardened**: All queries use parameterized bindings; dynamic values are type-validated and clamped
-- **API key protection**: `api_key` is excluded from serialization and sourced from `STRATA_API_KEY` env var
-- **Multi-tenant isolation**: Wings + tenant_id provide strict namespace separation
-- **Audit trail**: Every memorize/wake_up/search operation is logged (Markdown + SQLite)
-- **Air-gapped ready**: Works entirely offline; no external API calls except embedding (configurable to local)
+- **Local-first SoT**: SQLite Truth Store on disk; no cloud write path
+- **Credential isolation**: API keys only via `STRATA_API_KEY` (never persisted full key in config.json)
+- **Quality Kernel**: rejects secrets / tokens / private keys at write time
+- **CBT redaction**: defense-in-depth secret scrubbing before insert
+- **Scope isolation**: hard fail on cross `user_id` / `tenant_id` expand
+- **Confirmation gate**: `strata_rebuild_index` requires `confirm=true` (index only; SoT untouched)
+- **Parameterized SQL**: all queries bound; LIMIT clamped
+- **Path sandbox**: legacy Markdown paths still resolve inside palace
+- **Audit + trajectory**: every tool call logged for post-incident review
+- **Air-gapped ready**: embedding can be cloud or self-hosted; SoT never requires network
 
-## Recent Security Audits
+## Zero-trust defaults
 
-The v0.2.0 release incorporated fixes from a full security audit (June 2026):
+| Risk | Mitigation |
+|------|------------|
+| Prompt injection → illicit write | No raw CRUD tools; Kernel + type enum + confidence floor |
+| Prompt injection → index wipe | confirm gate on rebuild |
+| Context dump / data exfil via recall | Progressive disclosure (id+summary first) |
+| Cross-tenant leak | tenant_id + user_id checks on expand |
+| Key leakage into memory | SECRET_DETECTED reject + redaction |
 
-- P0-01: SQL injection via `LIMIT` — fixed with `int()` clamping
-- P0-02: API key plaintext storage — fixed with env var fallback + serialization exclusion
-- P0-03: Path traversal via user/room params — fixed with segment sanitization + `.resolve()` sandbox
+## Recent Audits
 
-Thank you for helping keep Strata Memory secure.
+v0.2.0 fixed SQL LIMIT injection, API key plaintext, path traversal.
+
+v2.0.0 adds write-time Quality Kernel, scope-checked expand, confirm gates, trajectory audit.

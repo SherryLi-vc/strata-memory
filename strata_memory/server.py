@@ -1,101 +1,193 @@
-"""Strata Memory MCP Server v0.2.0.
+"""Strata Memory MCP Server v2.0.0 — Industrial AI Memory Base.
 
-Dual-mode architecture (personal/company) with enterprise features:
-  - Personal: CBT safety, emotional tracking, 48h cooling
-  - Company:  Multi-tenancy, AuditLog, Wing→Hall→Room→Drawer hierarchy
+Core philosophy: LLM decides; deterministic code executes.
 
-Agent-Driven Onboarding (NEW):
-  - get_system_profile              — Silent hardware detection
-  - search_embedding_recommendations — Hardware-aware model matching
-  - apply_memory_config             — Config persistence + hot reload
-  - strata://memory/setup-instructions.md — Agent onboarding guide
+Tool surface (intent-aggregated, < 15):
+  Setup:   strata_init
+  Write:   commit_memory, promote_session
+  Read:    recall_context, expand_memory_detail
+  Ops:     strata_doctor, strata_rebuild_index, strata_stats, strata_project
 
-Core tools:
-  - strata_init    — First-time setup with mode selection
-  - memorize       — Enhanced write with psych fields
-  - wake_up        — L0+L1+L2 with defusion for negative schemas
-  - search         — Semantic search with category/time/tag filters
-  - get_health     — Runtime status with mode-aware stats
-
-Resources:
-  - strata://onboarding/steps.md
-  - strata://memory/setup-instructions.md
-  - strata://stats
-  - strata://wings
-  - strata://audit/logs
+All descriptions follow: 作用 + 触发 + 禁忌 (three-part defensive contract).
 """
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import date
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
-from mcp.types import Resource, ServerCapabilities, TextContent, Tool, ToolsCapability, ResourcesCapability
+from mcp.types import (
+    Resource,
+    ResourcesCapability,
+    ServerCapabilities,
+    TextContent,
+    Tool,
+    ToolsCapability,
+)
 
 from .audit import AuditLogger
-from .config import Config, ensure_palace, is_initialized, load_config, save_config
-from .embedding import EmbeddingProvider
-from .pipeline.memorize import memorize as pipeline_memorize
-from .pipeline.wake import wake_up as pipeline_wake_up
-from .storage.chroma import ChromaStore
-from .storage.markdown import estimate_tokens, list_drawers
-from .tools.system_profile import (
-    SETUP_INSTRUCTIONS_TEMPLATE,
-    apply_memory_config,
-    get_system_profile,
-    search_embedding_recommendations,
+from .config import (
+    Config,
+    api_key_status,
+    ensure_palace,
+    is_initialized,
+    is_usable_api_key,
+    load_config,
+    resolve_api_key,
+    save_config,
+    truth_db_path,
 )
+from .embedding import EmbeddingProvider
+from .governance import ToolError, error_payload
+from .ops import dump_markdown_projection, strata_doctor, strata_rebuild_index, strata_stats
+from .pipeline.commit import commit_memory as pipeline_commit
+from .pipeline.commit import promote_session as pipeline_promote
+from .pipeline.digest import run_digest
+from .pipeline.recall import expand_memory_detail as pipeline_expand
+from .pipeline.recall import recall_context as pipeline_recall
+from .storage.chroma import ChromaStore
+from .storage.truth_store import TruthStore
 
 # ── Global state ────────────────────────────────────────────────────────
 _config: Optional[Config] = None
 _embed_provider: Optional[EmbeddingProvider] = None
 _chroma: Optional[ChromaStore] = None
+_store: Optional[TruthStore] = None
 _auditor: Optional[AuditLogger] = None
-_health_cache: Optional[tuple[float, dict]] = None  # (timestamp, data) with 30s TTL
 
-REQUIRED_PARAMS: dict[str, list[str]] = {
-    "strata_init": ["api_key"],
-    "memorize": ["user_id", "content"],
-    "wake_up": ["user_id", "query"],
-    "search": ["query", "user_id"],
-}
+# Three-part description helper
+def _d(action: str, trigger: str, forbid: str) -> str:
+    return f"作用：{action}\n触发：{trigger}\n禁忌：{forbid}"
 
 
-def _get_state() -> tuple[Config, EmbeddingProvider, ChromaStore, AuditLogger]:
-    global _config, _embed_provider, _chroma, _auditor
-    if _config is None:
-        _config = load_config()
-    if _embed_provider is None:
-        cfg = _config.embedding
+def _ensure_embed_provider(config: Config) -> Optional[EmbeddingProvider]:
+    """Create embedding provider or raise ToolError with how_to_fix.
+
+    Never silently leave provider as None for cloud providers that need a key.
+    Re-reads env on every call so Hermes can hot-fix STRATA_API_KEY without
+    full process restart *after* _reset_state / next tool call post-fix.
+    """
+    global _embed_provider
+    if _embed_provider is not None:
+        return _embed_provider
+
+    cfg = config.embedding
+    # Always re-resolve from env — config.json never holds full key
+    key = resolve_api_key(cfg.api_key or "")
+    cfg.api_key = key
+    status = api_key_status(key)
+    provider = (cfg.provider or "siliconflow").lower()
+
+    needs_key = provider in {"siliconflow", "openai", "openai_compatible", "cloud"}
+    if needs_key and not is_usable_api_key(key):
+        raise ToolError(
+            "EMBEDDING_API_KEY_MISSING",
+            (
+                f"Embedding provider '{provider}' has no usable API key "
+                f"(status={status.get('reason')}, length={status.get('length', 0)})."
+            ),
+            fix=(
+                "Set a full key in the MCP process environment, then restart Hermes MCP:\n"
+                "  export STRATA_API_KEY='sk-...'   # full key, NOT sk-xxx...yyy redacted form\n"
+                "Or put STRATA_API_KEY into ~/.hermes/.env and use the updated strata-wrapper.sh.\n"
+                "Do NOT read OpenClaw memorySearch.remote.apiKey if it contains '...' "
+                "(that is a UI-redacted placeholder).\n"
+                "Verify: strata_doctor → embedding.api_key.usable must be true."
+            ),
+            retry_safe=True,
+            fields={"api_key_status": status, "provider": provider},
+        )
+
+    try:
         _embed_provider = EmbeddingProvider.create(
-            provider=cfg.provider, model=cfg.model,
-            base_url=cfg.base_url, api_key=cfg.api_key,
+            provider=cfg.provider,
+            model=cfg.model,
+            base_url=cfg.base_url,
+            api_key=key,
             dimension=cfg.dimension,
         )
+    except Exception as e:
+        raise ToolError(
+            "EMBEDDING_PROVIDER_INIT_FAILED",
+            f"Failed to create embedding provider '{provider}': {e}",
+            fix=(
+                "Check provider/model/base_url in config. "
+                "For siliconflow: provider=siliconflow, model=BAAI/bge-m3, "
+                "base_url=https://api.siliconflow.cn/v1, and a valid STRATA_API_KEY."
+            ),
+            retry_safe=True,
+            fields={"provider": provider, "error": str(e)},
+        ) from e
+    return _embed_provider
+
+
+def _get_state(
+    *,
+    require_embed: bool = False,
+) -> tuple[Config, TruthStore, Optional[EmbeddingProvider], Optional[ChromaStore], AuditLogger]:
+    global _config, _embed_provider, _chroma, _store, _auditor
+    if _config is None:
+        _config = load_config()
+    else:
+        # Refresh key from env each time (Hermes may inject env after boot)
+        refreshed = resolve_api_key(_config.embedding.api_key or "")
+        if refreshed and refreshed != _config.embedding.api_key:
+            _config.embedding.api_key = refreshed
+            _embed_provider = None  # force recreate with new key
+
+    palace = Path(_config.palace_path)
+    if _store is None:
+        ensure_palace(palace)
+        _store = TruthStore(truth_db_path(palace))
+
+    embed: Optional[EmbeddingProvider] = _embed_provider
+    if require_embed or _embed_provider is None:
+        try:
+            embed = _ensure_embed_provider(_config)
+        except ToolError:
+            if require_embed:
+                raise
+            # Non-vector tools (doctor/stats/commit without index) may proceed
+            embed = None
+
     if _chroma is None:
-        palace = Path(_config.palace_path)
         _chroma = ChromaStore(palace / "l2_vector")
     if _auditor is None:
-        _auditor = AuditLogger(Path(_config.palace_path))
-    return _config, _embed_provider, _chroma, _auditor
+        _auditor = AuditLogger(palace)
+    return _config, _store, embed, _chroma, _auditor
 
 
-def _reset_state():
-    global _config, _embed_provider, _chroma, _auditor, _health_cache
+def _reset_state() -> None:
+    global _config, _embed_provider, _chroma, _store, _auditor
     _config = None
     _embed_provider = None
     _chroma = None
+    _store = None
     _auditor = None
-    _health_cache = None
 
 
-# ── Server setup ────────────────────────────────────────────────────────
+def _json(data: Any) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps(data, indent=2, ensure_ascii=False))]
+
+
+def _tool_error(e: Exception) -> list[TextContent]:
+    if isinstance(e, ToolError):
+        return _json(e.to_dict())
+    return _json(error_payload(
+        "INTERNAL_ERROR",
+        str(e),
+        fix="Inspect strata_doctor. If index-related, try strata_rebuild_index(confirm=true).",
+        retry_safe=True,
+    ))
+
+
+# ── Server ──────────────────────────────────────────────────────────────
 server = Server("strata-memory")
 
 
@@ -104,112 +196,244 @@ async def handle_list_tools() -> list[Tool]:
     return [
         Tool(
             name="strata_init",
-            description="First-time initialization with dual-mode setup. Choose 'personal' (CBT safety, 48h cooling) or 'company' (multi-tenancy, AuditLog, private embedding).",
+            description=_d(
+                "初始化 Memory Palace：写入配置、创建 SQLite Truth Store 与向量目录。",
+                "首次使用或重置部署时调用一次。",
+                "禁止在已有生产数据上重复 init 覆盖配置而不备份；禁止把 API Key 写进对话日志。",
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "api_key": {"type": "string", "description": "API key for embedding provider."},
-                    "mode": {"type": "string", "enum": ["personal", "company"],
-                             "description": "Memory mode. personal=CBT safety+emotional tracking. company=multi-tenancy+AuditLog.", "default": "personal"},
-                    "provider": {"type": "string", "description": "Embedding provider.", "default": "siliconflow"},
-                    "model": {"type": "string", "description": "Embedding model.", "default": "BAAI/bge-m3"},
-                    "base_url": {"type": "string", "description": "API base URL.", "default": "https://api.siliconflow.cn/v1"},
-                    "cbt_mode": {"type": "string", "enum": ["passive", "active", "off"],
-                                 "description": "CBT safety mode (personal default=passive, company default=off)."},
-                    "tenant_id": {"type": "string", "description": "Tenant identifier (company mode)."},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["personal", "company"],
+                        "description": "personal=CBT 冷却；company=多租户+审计。",
+                        "default": "personal",
+                    },
+                    "api_key": {
+                        "type": "string",
+                        "description": "Embedding API key。优先使用环境变量 STRATA_API_KEY，可省略此字段。",
+                    },
+                    "provider": {"type": "string", "default": "siliconflow"},
+                    "model": {"type": "string", "default": "BAAI/bge-m3"},
+                    "base_url": {
+                        "type": "string",
+                        "default": "https://api.siliconflow.cn/v1",
+                    },
+                    "cbt_mode": {
+                        "type": "string",
+                        "enum": ["passive", "active", "off"],
+                        "description": "personal 默认 passive；company 默认 off。",
+                    },
+                    "tenant_id": {
+                        "type": "string",
+                        "description": "company 模式必填租户 ID。",
+                    },
                 },
-                "required": ["api_key"],
+                "required": [],
             },
         ),
         Tool(
-            name="memorize",
-            description="Record a conversation/fact into memory with psych-validated metadata (emotional_salience, context_tags, is_negative_schema). Writes Markdown drawer + vector index.",
+            name="commit_memory",
+            description=_d(
+                "将萃取后的高价值事实持久化到 SQLite Truth Store（经 Quality Kernel 校验）。",
+                "跨多轮对话确认的客观事实、用户显式偏好、可复用操作规程；或需暂存的 session scratch。",
+                "拒绝写入临时情绪、假设推演、密码/Token/API Key；禁止模糊时间（刚才/昨天）；"
+                "严禁把未经确认的推测写成 factual_truth。",
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "string", "description": "User/wing identifier."},
-                    "content": {"type": "string", "description": "Raw text content to memorize."},
-                    "category": {"type": "string", "enum": ["event","preference","procedure","core_identity","lesson","fact","goal","relationship"],
-                                 "description": "Memory category (affects decay rate).", "default": "event"},
-                    "importance": {"type": "number", "description": "Base importance 0.0-1.0.", "default": 0.5},
-                    "room": {"type": "string", "description": "Room within wing.", "default": "general"},
-                    "context_tags": {"type": "array", "items": {"type": "string"},
-                                     "description": "Tags for state-dependent retrieval."},
+                    "user_id": {
+                        "type": "string",
+                        "description": "主体 ID（三维坐标之一）。必填。",
+                    },
+                    "memory_type": {
+                        "type": "string",
+                        "enum": [
+                            "factual_truth",
+                            "user_preference",
+                            "procedure_rule",
+                            "episodic_event",
+                        ],
+                        "description": "严格类型；系统据此分配 TTL 与默认层级。",
+                    },
+                    "fact_claim": {
+                        "type": "string",
+                        "description": "高度压缩的第三人称事实陈述。禁止模糊时间与秘密。",
+                    },
+                    "confidence_score": {
+                        "type": "number",
+                        "minimum": 0.1,
+                        "maximum": 1.0,
+                        "description": "LLM 对事实真实性的自评 [0.1,1.0]。低于阈值将仅进 scratch。",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "会话 ID。scratch 或 company 隔离时建议必填。",
+                    },
+                    "tenant_id": {
+                        "type": "string",
+                        "description": "租户 ID。company 模式使用；默认取配置。",
+                    },
+                    "is_scratch": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "true=仅会话暂存，需 promote_session 才晋升 durable。",
+                    },
+                    "room": {"type": "string", "default": "general"},
+                    "context_tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "状态依赖检索标签。",
+                    },
                 },
-                "required": ["user_id", "content"],
+                "required": ["user_id", "memory_type", "fact_claim", "confidence_score"],
             },
         ),
         Tool(
-            name="wake_up",
-            description="Session wake-up: L0 profile + L1 diary + L2 semantic search with CBT defusion for negative schemas. Returns flat Markdown.",
+            name="promote_session",
+            description=_d(
+                "将会话 Scratch Buffer 中已验证记忆晋升为 durable（L0/L2）并补建向量索引。",
+                "会话结束、用户确认要点、或完成任务复盘后。",
+                "禁止在未验证的噪音会话上批量 promote；禁止跨 session_id 调用。",
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "user_id": {"type": "string", "description": "User/wing identifier."},
-                    "query": {"type": "string", "description": "Current context/question to match against."},
-                    "context_depth": {"type": "string", "enum": ["shallow", "deep"],
-                                      "description": "shallow=L0+L1 only, deep=L0+L1+L2.", "default": "shallow"},
-                    "limit": {"type": "integer", "description": "Max L2 results.", "default": 5},
+                    "user_id": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "tenant_id": {"type": "string"},
+                },
+                "required": ["user_id", "session_id"],
+            },
+        ),
+        Tool(
+            name="recall_context",
+            description=_d(
+                "渐进式召回：Hybrid RRF（向量+FTS）返回 {id, summary, score} 卡片，控制 Token。",
+                "新会话开始、需要相关记忆时；默认 deep=L0+检索，shallow=仅核心画像。",
+                "禁止把返回结果当作全文；需要细节时必须再调 expand_memory_detail。"
+                "禁止无 query 的全库倾倒。",
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "query": {
+                        "type": "string",
+                        "description": "当前意图/问题，用于语义+全文匹配。",
+                    },
+                    "session_id": {"type": "string"},
+                    "tenant_id": {"type": "string"},
+                    "limit": {
+                        "type": "integer",
+                        "default": 8,
+                        "minimum": 1,
+                        "maximum": 20,
+                    },
+                    "context_depth": {
+                        "type": "string",
+                        "enum": ["shallow", "deep"],
+                        "default": "deep",
+                    },
                 },
                 "required": ["user_id", "query"],
             },
         ),
         Tool(
-            name="search",
-            description="Active semantic search across L2 memories with time/category/tag filters and state-dependent boosting.",
+            name="expand_memory_detail",
+            description=_d(
+                "按 memory_id 二次拉取完整 detail（渐进披露第二阶段）。",
+                "recall_context 命中卡片后，模型判断需要原文细节时。",
+                "禁止猜测 id；禁止用其他 user_id 读取（硬隔离）。单次 detail 上限 4000 字符。",
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query."},
-                    "user_id": {"type": "string", "description": "Wing scope."},
-                    "limit": {"type": "integer", "default": 10},
-                    "category": {"type": "string", "description": "Category filter."},
-                    "from_date": {"type": "string", "description": "ISO start date."},
-                    "to_date": {"type": "string", "description": "ISO end date."},
-                    "context_tags": {"type": "array", "items": {"type": "string"},
-                                     "description": "State-dependent boost tags."},
+                    "user_id": {"type": "string"},
+                    "memory_id": {
+                        "type": "string",
+                        "description": "来自 recall_context hits[].id",
+                    },
+                    "tenant_id": {"type": "string"},
                 },
-                "required": ["query", "user_id"],
+                "required": ["user_id", "memory_id"],
             },
         ),
         Tool(
-            name="get_health",
-            description="Runtime status: initialized, mode, CBT, audit, vector/drawer count, config summary.",
+            name="strata_doctor",
+            description=_d(
+                "一键巡检 SQLite SoT 与向量索引一致性（类似 git fsck）。",
+                "部署后自检、召回异常、怀疑索引污染时。",
+                "非对话记忆工具；不要在每轮用户闲聊时调用。",
+            ),
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
-            name="get_system_profile",
-            description="[Agent-Driven] Silent hardware profiling. Returns OS, RAM, CPU cores, GPU accelerator. No user input required — call this first during onboarding.",
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="search_embedding_recommendations",
-            description="[Agent-Driven] Return ranked embedding recommendations based on hardware profile. Gets best-fit local/cloud models from MTEB-informed lookup table.",
+            name="strata_rebuild_index",
+            description=_d(
+                "清空并从 SQLite 全量重建向量索引（重建级容灾）。",
+                "doctor 报告 INDEX_EMPTY/ORPHANS，或 embedding 模型/维度变更后。",
+                "必须 confirm=true。仅摧毁向量伴生层，绝不删除 SQLite 真相源。"
+                "禁止在无 API Key 时强行 rebuild。",
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "profile": {"type": "object", "description": "Optional hardware profile from get_system_profile. If omitted, runs detection automatically."},
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "确认门：必须为 true 才执行。",
+                        "default": False,
+                    },
+                    "tenant_id": {"type": "string"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="strata_stats",
+            description=_d(
+                "打印 L0–L3 Token 水位线、类型分布与工具调用轨迹摘要。",
+                "预防上下文溢出、运维巡检、裁撤低效工具前的证据采集。",
+                "不要当作业务记忆检索接口。",
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {
+                        "type": "string",
+                        "description": "可选：只看该用户的层级切片。",
+                    },
                 },
             },
         ),
         Tool(
-            name="apply_memory_config",
-            description="[Agent-Driven] Apply chosen memory configuration: persist config, initialize Palace directories, ChromaDB, SQLite. Supports hot reload — no MCP restart needed.",
+            name="strata_project",
+            description=_d(
+                "从 SQLite 生成只读 Markdown 投影（人类/Obsidian 浏览用）。",
+                "需要 Git diff、人工审阅或导出可读快照时。",
+                "投影不可写回；禁止把投影目录当作数据库编辑。",
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "mode": {"type": "string", "enum": ["personal", "company"],
-                             "description": "Memory mode.", "default": "personal"},
-                    "provider": {"type": "string", "description": "Embedding provider (e.g. siliconflow, local)."},
-                    "model": {"type": "string", "description": "Embedding model name."},
-                    "api_key": {"type": "string", "description": "API key for cloud providers."},
-                    "base_url": {"type": "string", "description": "API base URL."},
-                    "dimension": {"type": "integer", "description": "Embedding dimension.", "default": 384},
-                    "cbt_mode": {"type": "string", "enum": ["passive", "active", "off"],
-                                 "description": "CBT safety mode."},
-                    "tenant_id": {"type": "string", "description": "Tenant identifier (company mode)."},
+                    "user_id": {"type": "string", "description": "可选：仅投影该用户。"},
                 },
-                "required": ["mode", "provider", "model"],
+            },
+        ),
+        Tool(
+            name="strata_digest",
+            description=_d(
+                "后台遗忘任务：按 TTL/分数将陈旧记忆 demote→L3 或 archive（不物理删除）。",
+                "夜间 cron 或显式运维；不要在用户对话热路径自动频繁调用。",
+                "dry_run=true 可先预览。禁止用此工具删除用户主动要求保留的核心身份。",
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {"type": "boolean", "default": True},
+                },
             },
         ),
     ]
@@ -218,406 +442,473 @@ async def handle_list_tools() -> list[Tool]:
 @server.list_resources()
 async def handle_list_resources() -> list[Resource]:
     resources = [
-        Resource(uri="strata://onboarding/steps.md", name="Onboarding Guide",
-                 description="Dual-mode initialization steps (personal + company).", mimeType="text/markdown"),
-        Resource(uri="strata://memory/setup-instructions.md", name="Agent-Driven Setup Guide",
-                 description="[Agent-Driven] Dynamic setup instructions for the AI agent. Read this first during onboarding to learn the Agent-Driven initialization flow.", mimeType="text/markdown"),
-        Resource(uri="strata://stats", name="Memory Statistics",
-                 description="System stats: drawer/vector count, mode, config.", mimeType="application/json"),
-        Resource(uri="strata://wings", name="Wing Directory",
-                 description="All wings and their rooms.", mimeType="application/json"),
+        Resource(
+            uri="strata://onboarding/steps.md",
+            name="Onboarding Guide",
+            description="2.0 初始化与工具契约说明。",
+            mimeType="text/markdown",
+        ),
+        Resource(
+            uri="strata://stats",
+            name="Memory Statistics",
+            description="Truth Store + waterline JSON。",
+            mimeType="application/json",
+        ),
+        Resource(
+            uri="strata://architecture",
+            name="Architecture Summary",
+            description="SoT / projection / rebuildable index 说明。",
+            mimeType="text/markdown",
+        ),
     ]
     if is_initialized():
-        resources.append(Resource(uri="strata://audit/logs", name="Audit Logs",
-                                  description="Operation audit trail.", mimeType="application/json"))
+        resources.append(
+            Resource(
+                uri="strata://audit/logs",
+                name="Audit Summary",
+                description="最近审计与轨迹摘要。",
+                mimeType="application/json",
+            )
+        )
     return resources
 
 
-# ── Tool dispatcher ─────────────────────────────────────────────────────
-
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
-    # Structured parameter validation
-    if name in REQUIRED_PARAMS:
-        missing = [p for p in REQUIRED_PARAMS[name] if p not in arguments or arguments.get(p, "") == ""]
-        if missing:
-            return [TextContent(type="text", text=(
-                f"Missing required parameters: {', '.join(missing)}.\n"
-                f"Expected: `{name}({', '.join(REQUIRED_PARAMS[name])})`"
-            ))]
+    t0 = time.time()
+    args = arguments or {}
+    status = "ok"
+    err_code = ""
     try:
         if name == "strata_init":
-            return await _handle_strata_init(arguments)
-        elif name == "memorize":
-            return await _handle_memorize(arguments)
-        elif name == "wake_up":
-            return await _handle_wake_up(arguments)
-        elif name == "search":
-            return await _handle_search(arguments)
-        elif name == "get_health":
-            return await _handle_get_health(arguments)
-        elif name == "get_system_profile":
-            return _handle_get_system_profile()
-        elif name == "search_embedding_recommendations":
-            return _handle_search_embedding_recommendations(arguments)
-        elif name == "apply_memory_config":
-            return await _handle_apply_memory_config(arguments)
+            result = await _handle_init(args)
+        elif name == "commit_memory":
+            result = await _handle_commit(args)
+        elif name == "promote_session":
+            result = await _handle_promote(args)
+        elif name == "recall_context":
+            result = await _handle_recall(args)
+        elif name == "expand_memory_detail":
+            result = _handle_expand(args)
+        elif name == "strata_doctor":
+            result = _handle_doctor()
+        elif name == "strata_rebuild_index":
+            result = await _handle_rebuild(args)
+        elif name == "strata_stats":
+            result = _handle_stats(args)
+        elif name == "strata_project":
+            result = _handle_project(args)
+        elif name == "strata_digest":
+            result = _handle_digest(args)
         else:
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
-    except ValueError as e:
-        return [TextContent(type="text", text=f"Error: {e}")]
+            status = "error"
+            err_code = "UNKNOWN_TOOL"
+            result = error_payload(
+                "UNKNOWN_TOOL",
+                f"Unknown tool: {name}",
+                fix=(
+                    "Use one of: strata_init, commit_memory, promote_session, "
+                    "recall_context, expand_memory_detail, strata_doctor, "
+                    "strata_rebuild_index, strata_stats, strata_project, strata_digest."
+                ),
+            )
+        if isinstance(result, dict) and result.get("status") == "error":
+            status = "error"
+            err_code = result.get("error_code", "")
+        out = _json(result) if isinstance(result, dict) else result
     except Exception as e:
-        return [TextContent(type="text", text=f"Internal error: {e}")]
+        status = "error"
+        err_code = getattr(e, "code", "INTERNAL_ERROR")
+        out = _tool_error(e)
+    finally:
+        try:
+            cfg, store, *_ = _get_state()
+            store.log_trajectory(
+                name,
+                tenant_id=str(args.get("tenant_id") or cfg.tenant_id or ""),
+                user_id=str(args.get("user_id") or ""),
+                session_id=str(args.get("session_id") or ""),
+                args_digest=",".join(sorted(args.keys())),
+                result_status=status,
+                error_code=err_code,
+                latency_ms=int((time.time() - t0) * 1000),
+            )
+        except Exception:
+            pass
+    return out
 
 
 @server.read_resource()
 async def handle_read_resource(uri: str) -> str:
     if uri == "strata://onboarding/steps.md":
-        return _onboarding_steps()
-    elif uri == "strata://memory/setup-instructions.md":
-        return _setup_instructions()
-    elif uri == "strata://stats":
-        return await _stats_json()
-    elif uri == "strata://wings":
-        return await _wings_json()
-    elif uri == "strata://audit/logs":
-        return await _audit_json()
-    else:
-        raise ValueError(f"Unknown resource: {uri}")
+        return _onboarding_md()
+    if uri == "strata://architecture":
+        return _architecture_md()
+    if uri == "strata://stats":
+        return json.dumps(_handle_stats({}), indent=2, ensure_ascii=False)
+    if uri == "strata://audit/logs":
+        return _audit_resource()
+    raise ValueError(f"Unknown resource: {uri}")
 
 
-# ── Tool implementations ────────────────────────────────────────────────
+# ── Handlers ────────────────────────────────────────────────────────────
 
-async def _handle_strata_init(args: dict) -> list[TextContent]:
-    api_key = args["api_key"]
+async def _handle_init(args: dict) -> dict:
     mode = args.get("mode", "personal")
     provider = args.get("provider", "siliconflow")
     model = args.get("model", "BAAI/bge-m3")
     base_url = args.get("base_url", "https://api.siliconflow.cn/v1")
     tenant_id = args.get("tenant_id", "")
+    api_key = resolve_api_key(str(args.get("api_key") or ""))
+    key_stat = api_key_status(api_key)
 
-    # Mode-aware CBT defaults
-    if mode == "company":
-        cbt_default = args.get("cbt_mode", "off")
-    else:
-        cbt_default = args.get("cbt_mode", "passive")
+    if mode == "company" and not tenant_id:
+        return error_payload(
+            "TENANT_REQUIRED",
+            "company mode requires tenant_id.",
+            fix="Pass tenant_id='your_org_id' or use mode='personal'.",
+        )
+
+    if (provider or "siliconflow") == "siliconflow" and not is_usable_api_key(api_key):
+        return error_payload(
+            "EMBEDDING_API_KEY_MISSING",
+            (
+                "strata_init: no usable SiliconFlow API key "
+                f"(status={key_stat.get('reason')}, length={key_stat.get('length', 0)})."
+            ),
+            fix=(
+                "Pass a full api_key= OR export STRATA_API_KEY before starting Hermes. "
+                "Reject keys containing '...' (OpenClaw redaction). "
+                "Recommended: put STRATA_API_KEY in ~/.hermes/.env and use updated strata-wrapper.sh."
+            ),
+            fields={"api_key_status": key_stat},
+        )
+
+    cbt_default = args.get("cbt_mode") or ("off" if mode == "company" else "passive")
+    palace_path = os.environ.get("STRATA_PALACE") or str(Path.home() / ".strata" / "palace")
 
     config = Config(
         mode=mode,
         tenant_id=tenant_id,
+        version="2.0.0",
+        storage_backend="sqlite",
         embedding={
-            "provider": provider, "model": model,
-            "api_key": api_key, "base_url": base_url, "dimension": 384,
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "dimension": 384,
         },
         cbt={
-            "enabled": mode == "personal",
-            "mode": cbt_default, "cooling_hours": 48,
+            "enabled": mode == "personal" and cbt_default != "off",
+            "mode": cbt_default,
+            "cooling_hours": 48,
             "detect_distortions": mode == "personal",
         },
-        audit={"enabled": mode == "company", "log_to_db": mode == "company",
-               "log_to_markdown": True, "retention_days": 365},
+        audit={
+            "enabled": mode == "company",
+            "log_to_db": True,
+            "log_to_markdown": True,
+            "retention_days": 365,
+        },
+        palace_path=palace_path,
     )
-
-    env_path = os.environ.get("STRATA_PALACE", "")
-    palace_path = env_path or str(Path.home() / ".strata" / "palace")
-    config.palace_path = palace_path
-
     palace = Path(palace_path)
     ensure_palace(palace)
     save_config(config)
+    # Eager create SoT
+    TruthStore(truth_db_path(palace))
     _reset_state()
 
-    return [TextContent(type="text", text=(
-        f"Strata Memory initialized ({mode} mode).\n\n"
-        f"Palace: {palace_path}\n"
-        f"Embedding: {provider}/{model}\n"
-        f"CBT: {cbt_default} (cooling=48h)\n"
-        f"Audit: {'enabled' if config.audit.enabled else 'markdown-only'}\n"
-        f"Tenant: {tenant_id or 'N/A (personal mode)'}\n\n"
-        f"Next: Use `memorize` to start recording memories."
-    ))]
+    return {
+        "status": "ok",
+        "message": f"Strata Memory 2.0 initialized ({mode} mode).",
+        "version": "2.0.0",
+        "palace": palace_path,
+        "truth_db": str(truth_db_path(palace)),
+        "embedding": f"{provider}/{model}",
+        "cbt": cbt_default,
+        "tenant_id": tenant_id or None,
+        "api_key_configured": is_usable_api_key(api_key),
+        "api_key_status": key_stat,
+        "next": [
+            "strata_doctor() — confirm embedding.api_key.usable=true",
+            "commit_memory(...) to write facts",
+            "recall_context(...) at session start",
+        ],
+    }
 
 
-async def _handle_memorize(args: dict) -> list[TextContent]:
-    config, embed_provider, chroma, auditor = _get_state()
+async def _handle_commit(args: dict) -> dict:
+    # Embed preferred but not hard-required: SoT write still succeeds; index may lag.
+    config, store, embed, chroma, _ = _get_state(require_embed=False)
     if not is_initialized():
-        return [TextContent(type="text", text="Error: Strata not initialized. Run `strata_init` first.")]
-
-    user_id = args["user_id"]
-    content = args["content"]
-    category = args.get("category", "event")
-    importance = float(args.get("importance", 0.5))
-    room = args.get("room", "general")
-    context_tags = args.get("context_tags", [])
-
-    result = await pipeline_memorize(
-        config=config, embed_provider=embed_provider, chroma=chroma,
-        user_id=user_id, content=content,
-        metadata={"category": category, "importance": importance, "room": room},
-        context_tags=context_tags,
-    )
-
-    auditor.log_memorize(user_id, content, result)
-    return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
-
-
-async def _handle_wake_up(args: dict) -> list[TextContent]:
-    config, embed_provider, chroma, auditor = _get_state()
-    if not is_initialized():
-        return [TextContent(type="text", text="Error: Strata not initialized.")]
-
-    user_id = args["user_id"]
-    query = args["query"]
-    context_depth = args.get("context_depth", "shallow")
-    limit = int(args.get("limit", 5))
-
-    result = await pipeline_wake_up(
-        config=config, embed_provider=embed_provider, chroma=chroma,
-        user_id=user_id, query=query, context_depth=context_depth, limit=limit,
-    )
-
-    auditor.log_wake_up(user_id, query, result)
-
-    footer = (
-        f"\n\n<!-- strata-wake-stats: v={config.version} mode={config.mode} "
-        f"tokens={result['token_estimate']} l0={1 if result.get('l0_loaded') else 0} "
-        f"l1={result['l1_entries']} l2={result['l2_results']} "
-        f"neg={result.get('negative_filtered',0)} cbt={result.get('cbt_mode','off')} "
-        f"depth={result['context_depth']} -->"
-    )
-    return [TextContent(type="text", text=result["context"] + footer)]
-
-
-async def _handle_search(args: dict) -> list[TextContent]:
-    config, embed_provider, chroma, auditor = _get_state()
-    if not is_initialized():
-        return [TextContent(type="text", text="Error: Strata not initialized.")]
-
-    query = args["query"]
-    user_id = args["user_id"]
-    limit = int(args.get("limit", 10))
-    category = args.get("category")
-    context_tags = args.get("context_tags", [])
-
-    wing = f"users/{user_id}"
-    query_vec = await embed_provider.embed(query)
-
-    where = {"wing": wing}
-    if category:
-        where["category"] = category
-
-    results = chroma.query(query_embedding=query_vec, top_k=limit, where=where)
-
-    lines = [f"# Search Results: \"{query}\"\n"]
-    MAX_DOC_CHARS = 1500
-    for i, r in enumerate(results, 1):
-        dist = r.get("distance", 0.0)
-        sim = max(0.0, 1.0 - dist)
-        meta = r.get("metadata", {})
-        raw_doc = r.get("document", "") or ""
-        doc = raw_doc[:MAX_DOC_CHARS]
-        if len(raw_doc) > MAX_DOC_CHARS:
-            doc += "\n\n*[truncated — use `search` with larger limit for full text]*"
-        lines.append(
-            f"## Result {i} (relevance: {sim:.2f})\n"
-            f"- **Date**: {meta.get('date', 'unknown')}\n"
-            f"- **Category**: {meta.get('category', 'unknown')}\n"
-            f"- **Room**: {meta.get('room', 'unknown')}\n"
-            f"\n{doc}\n---\n"
+        return error_payload(
+            "NOT_INITIALIZED",
+            "Strata not initialized.",
+            fix="Call strata_init(mode='personal') first (API key via STRATA_API_KEY env recommended).",
         )
-    if context_tags:
-        lines.insert(1, f"*State-dependent boost: {', '.join(context_tags)}*\n")
-
-    auditor.log_search(user_id, query, len(results))
-    return [TextContent(type="text",
-            text="\n".join(lines) if results else f"No results for: {query}")]
-
-
-async def _handle_get_health(args: dict) -> list[TextContent]:
-    global _health_cache
-    import time
-    now = time.time()
-    if _health_cache and (now - _health_cache[0]) < 30:
-        return [TextContent(type="text", text=json.dumps(_health_cache[1], indent=2, ensure_ascii=False))]
-
-    config, _, chroma, _ = _get_state()
-    palace = Path(config.palace_path)
-    init = is_initialized()
-    vc = chroma.count() if init else 0
-    dc = 0
-    if init:
+    embed_warning: Optional[dict] = None
+    if embed is None:
         try:
-            dc = len(list(list_drawers(palace, "users", from_date=None)))
-        except Exception:
-            dc = 0
-
-    health = {
-        "version": config.version,
-        "initialized": init,
-        "mode": config.mode,
-        "palace": str(palace),
-        "tenant": config.tenant_id or "N/A",
-        "embedding": {"provider": config.embedding.provider, "model": config.embedding.model,
-                       "dimension": config.embedding.dimension, "mode": config.embedding.mode},
-        "cbt": {"enabled": config.cbt.enabled, "mode": config.cbt.mode,
-                "cooling_hours": config.cbt.cooling_hours},
-        "audit": {"enabled": config.audit.enabled, "log_to_markdown": config.audit.log_to_markdown},
-        "memory": {"vector_count": vc, "drawer_count": dc,
-                   "l0_token_budget": config.l0_token_budget,
-                   "l1_days": config.l1_days, "l2_top_k": config.l2_top_k,
-                   "promotion_threshold": config.promotion_threshold,
-                   "demotion_threshold": config.demotion_threshold,
-                   "cooling_hours": config.cbt.cooling_hours},
-        "scoring": {"promotion_min_usage": config.promotion_min_usage,
-                    "l3_demotion_days": config.l3_demotion_days},
-    }
-    _health_cache = (now, health)
-    return [TextContent(type="text", text=json.dumps(health, indent=2, ensure_ascii=False))]
-
-
-# ── Agent-Driven Onboarding tool handlers ──────────────────────────────
-
-def _handle_get_system_profile() -> list[TextContent]:
-    """Silent hardware detection — returns structured profile for the Agent."""
-    profile = get_system_profile()
-    return [TextContent(type="text", text=json.dumps(profile, indent=2, ensure_ascii=False))]
-
-
-def _handle_search_embedding_recommendations(args: dict) -> list[TextContent]:
-    """Return ranked embedding recommendations based on profile."""
-    profile = args.get("profile")
-    recommendations = search_embedding_recommendations(profile)
-    # Include the profile used for transparency
-    if profile is None:
-        profile = get_system_profile()
-    result = {
-        "profile": profile,
-        "recommendations": recommendations,
-        "note": "Recommendations are sorted by priority (best first). Present the top 2-3 to the user.",
-    }
-    return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
+            embed = _ensure_embed_provider(config)
+        except ToolError as te:
+            # SoT write still proceeds; vector index skipped with explicit warning
+            embed_warning = te.to_dict()
+    required = ["user_id", "memory_type", "fact_claim", "confidence_score"]
+    missing = [p for p in required if p not in args or args.get(p) in (None, "")]
+    if missing:
+        return error_payload(
+            "MISSING_PARAMS",
+            f"Missing: {', '.join(missing)}",
+            fix=(
+                "commit_memory(user_id, memory_type, fact_claim, confidence_score). "
+                "memory_type ∈ factual_truth|user_preference|procedure_rule|episodic_event."
+            ),
+            fields={"missing": missing},
+        )
+    result = await pipeline_commit(
+        config=config,
+        store=store,
+        embed_provider=embed,
+        chroma=chroma,
+        user_id=str(args["user_id"]),
+        memory_type=str(args["memory_type"]),
+        fact_claim=str(args["fact_claim"]),
+        confidence_score=float(args["confidence_score"]),
+        tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
+        session_id=str(args.get("session_id") or ""),
+        room=str(args.get("room") or "general"),
+        context_tags=args.get("context_tags") or [],
+        is_scratch=bool(args.get("is_scratch", False)),
+    )
+    if embed_warning:
+        result["vector_index_warning"] = embed_warning
+        result["indexed"] = False
+        result["message"] = (
+            (result.get("message") or "ok")
+            + " | Vector index skipped: fix STRATA_API_KEY then strata_rebuild_index(confirm=true)."
+        )
+    return result
 
 
-async def _handle_apply_memory_config(args: dict) -> list[TextContent]:
-    """Apply memory configuration and hot-reload state."""
-    result = apply_memory_config(dict(args))
-    _reset_state()  # Hot reload: pick up new config on next call
-    return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
+async def _handle_promote(args: dict) -> dict:
+    config, store, embed, chroma, _ = _get_state()
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    if not args.get("user_id") or not args.get("session_id"):
+        return error_payload(
+            "MISSING_PARAMS",
+            "user_id and session_id required.",
+            fix="promote_session(user_id='...', session_id='...')",
+        )
+    return await pipeline_promote(
+        store=store,
+        config=config,
+        embed_provider=embed,
+        chroma=chroma,
+        user_id=str(args["user_id"]),
+        session_id=str(args["session_id"]),
+        tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
+    )
 
 
-# ── Resource implementations ────────────────────────────────────────────
+async def _handle_recall(args: dict) -> dict:
+    # Hybrid RRF degrades to FTS-only if embed missing; still try to init loudly.
+    try:
+        config, store, embed, chroma, _ = _get_state(require_embed=False)
+        if embed is None:
+            try:
+                embed = _ensure_embed_provider(config)
+            except ToolError:
+                embed = None  # FTS-only fallback
+    except ToolError as e:
+        return e.to_dict()
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    if not args.get("user_id") or not args.get("query"):
+        return error_payload(
+            "MISSING_PARAMS",
+            "user_id and query required.",
+            fix="recall_context(user_id='...', query='coding preferences')",
+        )
+    return await pipeline_recall(
+        config=config,
+        store=store,
+        embed_provider=embed,
+        chroma=chroma,
+        user_id=str(args["user_id"]),
+        query=str(args["query"]),
+        tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
+        session_id=str(args.get("session_id") or ""),
+        limit=int(args.get("limit") or 8),
+        context_depth=str(args.get("context_depth") or "deep"),
+    )
 
-def _setup_instructions() -> str:
-    """Return the Agent-Driven setup guide template."""
-    return SETUP_INSTRUCTIONS_TEMPLATE
+
+def _handle_expand(args: dict) -> dict:
+    config, store, *_ = _get_state()
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    if not args.get("user_id") or not args.get("memory_id"):
+        return error_payload(
+            "MISSING_PARAMS",
+            "user_id and memory_id required.",
+            fix="expand_memory_detail(user_id='...', memory_id='<id from recall>')",
+        )
+    return pipeline_expand(
+        store=store,
+        memory_id=str(args["memory_id"]),
+        user_id=str(args["user_id"]),
+        tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
+        config=config,
+    )
 
 
-def _onboarding_steps() -> str:
-    return """# Strata Memory — Agent Onboarding Guide
+def _handle_doctor() -> dict:
+    config, store, _, chroma, _ = _get_state()
+    return strata_doctor(config=config, store=store, chroma=chroma)
 
-## Dual-Mode Setup
 
-Strata Memory supports two modes:
+async def _handle_rebuild(args: dict) -> dict:
+    try:
+        config, store, embed, chroma, _ = _get_state(require_embed=True)
+    except ToolError as e:
+        return e.to_dict()
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    if embed is None:
+        return error_payload(
+            "NO_EMBEDDING_PROVIDER",
+            "Embedding provider unavailable (missing or redacted API key).",
+            fix=(
+                "export STRATA_API_KEY='sk-...' with the FULL key (no '...'), "
+                "update strata-wrapper.sh, restart Hermes MCP, then strata_doctor."
+            ),
+        )
+    # rebuild returns new chroma — reset global so next call reopens
+    result = await strata_rebuild_index(
+        config=config,
+        store=store,
+        embed_provider=embed,
+        chroma=chroma,  # type: ignore[arg-type]
+        confirm=bool(args.get("confirm", False)),
+        tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
+    )
+    if result.get("status") == "ok":
+        global _chroma
+        _chroma = None  # force reopen on wiped dir
+    return result
 
-| Mode | Features | Best For |
-|------|----------|----------|
-| **personal** | CBT safety, emotional tracking, 48h cooling-off, negative schema isolation | Individual users, long-term personal memory |
-| **company** | Multi-tenancy (Wing→Hall→Room→Drawer), AuditLog, PostgreSQL, private BGE-M3 | Industrial MES/WMS, multi-agent teams |
 
-## Personal Mode Setup
+def _handle_stats(args: dict) -> dict:
+    config, store, _, chroma, _ = _get_state()
+    return strata_stats(
+        config=config,
+        store=store,
+        chroma=chroma,
+        user_id=str(args.get("user_id") or ""),
+    )
 
-1. Ask the user: "I'll set up your personal memory system. I recommend SiliconFlow BGE-M3 for fast, Chinese-friendly embedding. Do you have an API key?"
 
-2. Run: `strata_init(api_key="sk-...", mode="personal")`
+def _handle_project(args: dict) -> dict:
+    config, store, *_ = _get_state()
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    palace = Path(config.palace_path)
+    return dump_markdown_projection(
+        store,
+        palace,
+        tenant_id=config.tenant_id or "",
+        user_id=args.get("user_id") or None,
+    )
 
-3. The system defaults to:
-   - CBT mode: passive (auto-filter negative self-talk)
-   - 48h cooling-off buffer (prevents single-event over-consolidation)
-   - Category-specific decay rates (event=0.85, procedure=0.98, core_identity=1.00)
 
-## Company Mode Setup
+def _handle_digest(args: dict) -> dict:
+    config, store, *_ = _get_state()
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    return run_digest(store, config, dry_run=bool(args.get("dry_run", True)))
 
-1. Ask: "For enterprise setup: tenant ID, private embedding endpoint, PostgreSQL connection?"
 
-2. Run: `strata_init(api_key="...", mode="company", tenant_id="factory_001")`
+def _onboarding_md() -> str:
+    return """# Strata Memory 2.0 — Agent Onboarding
 
-3. Company mode enables:
-   - Wing→Hall→Room→Drawer spatial hierarchy for business domains
-   - AuditLog (every operation recorded)
-   - Multi-tenant RBAC isolation
-   - CBT defaults to off (can be enabled for coaching agents)
+## Architecture (read this)
 
-## Start Recording
+- **SQLite** = Single Source of Truth (`palace/truth/strata.db`)
+- **ChromaDB** = rebuildable vector companion (`palace/l2_vector/`)
+- **Markdown** = read-only projection (`strata_project`)
 
-```
-memorize(user_id="user_001", content="User prefers dark mode for coding", category="preference")
-```
+## First-time setup
 
-## Wake Up Each Session
+1. Prefer env: `STRATA_API_KEY`, optional `STRATA_PALACE`
+2. Call `strata_init(mode="personal")` or company with `tenant_id`
+3. `strata_doctor()` — expect healthy / address warnings
+4. Write: `commit_memory(user_id, memory_type, fact_claim, confidence_score)`
+5. Read: `recall_context` → optional `expand_memory_detail`
 
-```
-wake_up(user_id="user_001", query="coding preferences", context_depth="deep")
-```
+## Memory types
+
+| type | meaning | default layer |
+|------|---------|---------------|
+| factual_truth | verified objective fact | L0 |
+| user_preference | stable preference | L0 |
+| procedure_rule | how-to / SOP | L0 |
+| episodic_event | time-bound episode | L2 (TTL 90d) |
+
+## Forbidden writes
+
+- secrets / API keys / passwords
+- pure emotion without fact
+- speculation as factual_truth
+- relative time (刚才 / yesterday) — use ISO dates
+
+## Progressive recall
+
+Never dump full library. `recall_context` returns cards; expand only what you need.
 """
 
 
-async def _stats_json() -> str:
-    config, _, chroma, _ = _get_state()
-    palace = Path(config.palace_path)
-    dc = 0
-    if is_initialized():
-        try:
-            dc = len(list(list_drawers(palace, "users", from_date=None)))
-        except Exception:
-            dc = 0
-    return json.dumps({
-        "version": config.version, "initialized": is_initialized(),
-        "mode": config.mode, "palace": str(palace),
-        "vectors": chroma.count() if is_initialized() else 0,
-        "drawers": dc, "provider": config.embedding.provider,
-        "model": config.embedding.model, "cbt": config.cbt.mode,
-    }, indent=2, ensure_ascii=False)
+def _architecture_md() -> str:
+    return """# Strata Memory 2.0 Architecture
+
+```
+LLM ──commit_memory──► Quality Kernel ──► CBT Middleware ──► SQLite (SoT)
+                                              │
+                                              └─► Chroma (companion, rebuildable)
+
+LLM ──recall_context──► Hybrid RRF (vector+FTS) ──► {id,summary,score}
+LLM ──expand_memory_detail(id)──► full detail (scope-checked)
+
+Ops: doctor | rebuild_index | stats | project | digest
+```
+
+Principle: **LLM decides; deterministic code owns metadata, TTL, safety, and storage.**
+"""
 
 
-async def _wings_json() -> str:
-    config, _, _, _ = _get_state()
-    palace = Path(config.palace_path)
-    wings_dir = palace / "wings" / "users"
-    wings = []
-    if wings_dir.exists():
-        for user_dir in sorted(wings_dir.iterdir()):
-            if user_dir.is_dir():
-                rooms = [d.name for d in user_dir.iterdir() if d.is_dir()]
-                wings.append({"wing": f"users/{user_dir.name}", "rooms": rooms})
-    return json.dumps({"mode": config.mode, "tenant": config.tenant_id, "wings": wings},
-                      indent=2, ensure_ascii=False)
+def _audit_resource() -> str:
+    config, store, *_ = _get_state()
+    return json.dumps(
+        {
+            "trajectory": store.trajectory_summary(40),
+            "stats": store.stats(),
+            "mode": config.mode,
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
 
 
-async def _audit_json() -> str:
-    config, _, _, _ = _get_state()
-    palace = Path(config.palace_path)
-    audit_dir = palace / "audit_logs"
-    entries = []
-    if audit_dir.exists():
-        for f in sorted(audit_dir.glob("*.md"), reverse=True)[:30]:
-            try:
-                post = __import__("frontmatter").load(str(f))
-                entries.append({"date": f.stem, "content": post.content[:500]})
-            except Exception:
-                pass
-    return json.dumps({"audit_entries": len(entries), "recent": entries[:5]},
-                      indent=2, ensure_ascii=False)
-
-
-# ── Entry point ─────────────────────────────────────────────────────────
-
-async def run():
+async def run() -> None:
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
-            read_stream, write_stream,
+            read_stream,
+            write_stream,
             InitializationOptions(
                 server_name="strata-memory",
-                server_version="0.2.0",
+                server_version="2.0.0",
                 capabilities=ServerCapabilities(
                     tools=ToolsCapability(listChanged=None),
                     resources=ResourcesCapability(listChanged=None),

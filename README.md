@@ -1,154 +1,180 @@
-# Strata Memory（分层记忆）MCP
+# Strata Memory 2.0（分层记忆 · 工业级 AI 记忆基座）
 
 <p align="center">
-  <img src="./assets/memory.png" alt="Strata Memory 分层记忆 MCP" width="80%">
+  <img src="./assets/memory.png" alt="Strata Memory" width="80%">
 </p>
 
 [![PyPI](https://img.shields.io/pypi/v/strata-memory-mcp.svg)](https://pypi.org/project/strata-memory-mcp/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.org)
 
-**Strata Memory（分层记忆）** 是新一代 AI Agent 记忆中枢系统，专为追求**透明、可控、持久**记忆体验的个人用户与企业场景打造。
+**大模型只做决策，确定性代码接管一切。**
 
-它以 **Markdown 文件系统** 为物理底座，将人类记忆的「地层」概念引入 AI 世界，构建出 **L0-L3 四层分层记忆架构**，彻底解决「黑盒不可解释、Token 爆炸、长期遗忘」三大痛点。
+Strata Memory 2.0 是面向 Multi-Agent 的 **MCP 记忆中枢**：以 **SQLite 为唯一真相源（SoT）**，向量库可一键重建，Markdown 仅为只读投影。写入经过 Quality Kernel / CBT 中间件；召回采用渐进式漏斗，避免上下文爆炸。
 
 ---
 
-## ✨ Core Features / 核心特性
+## 核心设计
 
-- **极致透明** / **Ultimate Transparency**: Markdown + YAML Frontmatter 物理存储，VSCode / Obsidian / Git 直接编辑
-- **智能分层** / **L0-L3 Tiered Architecture**: 永驻核心、近期日记、混合检索、冷归档，高效控制 Token
-- **混合检索** / **Hybrid Retrieval**: 私有化 BGE-M3 + SQLite/PostgreSQL KG + RRF 融合
-- **双模式设计** / **Dual Mode**:
-  - **个人模式** / Personal: 集成 CBT（负面图式隔离、48h 冷却期、叙事重构）
-  - **企业模式** / Enterprise: Memory Palace 空间化结构、多租户隔离、完整 AuditLog、MES/WMS 状态持久化
-- **Agent-Driven Onboarding**: 自动引导配置
-- **全私有部署** / Full Private Deployment: 支持内网与 Air-gapped 环境
+| 层 | 角色 | 可摧毁？ |
+|----|------|----------|
+| **SQLite Truth Store** | 权威数据（记忆 / 审计 / 轨迹） | 否（备份） |
+| **Chroma + BGE-M3** | 语义索引伴生层 | **是** — `strata_rebuild_index` |
+| **Markdown projection** | 人类可读视图 | **是** — `strata_project` 再生 |
 
-## 🚀 Quick Start / 快速开始
+- **L0–L3 分层** + 类型化 TTL（事实/偏好/规程/情节）
+- **三维隔离**：`tenant_id` + `user_id` + `session_id`
+- **Scratch → Durable**：会话暂存，确认后 `promote_session`
+- **防御性 MCP 契约**：工具描述强制「作用 / 触发 / 禁忌」
+
+## 快速开始
 
 ```bash
-# 一键运行
-uvx strata-memory-mcp
+# 推荐：环境变量注入密钥（禁止写入对话与 config 明文）
+export STRATA_API_KEY=sk-...
+# 可选：自定义 Palace 路径
+export STRATA_PALACE=~/.strata/palace
 
-# 或克隆仓库
+uvx strata-memory-mcp
+# 或
 git clone https://github.com/vincy/strata-memory.git
-cd strata-memory
-uv sync
-uv run strata-memory-mcp
+cd strata-memory && uv sync && uv run strata-memory-mcp
 ```
 
-### MCP Client Config / 客户端配置
-
-**Claude Desktop** (`claude_desktop_config.json`):
+### Claude Desktop
 
 ```json
 {
   "mcpServers": {
     "strata-memory": {
       "command": "uv",
-      "args": ["run", "strata-memory-mcp"]
+      "args": ["run", "--directory", "/path/to/strata-memory", "strata-memory-mcp"],
+      "env": {
+        "STRATA_API_KEY": "sk-...",
+        "STRATA_PALACE": "/path/to/palace"
+      }
     }
   }
 }
 ```
 
-**Hermes** (`~/.hermes/config.yaml`):
+### Hermes
 
-```yaml
-mcp_servers:
-  strata-memory:
-    command: uv
-    args:
-      - run
-      - strata-memory-mcp
-    timeout: 120
+```bash
+# 推荐：完整 key 写入 Hermes env（禁止 sk-xxx...yyy 脱敏占位）
+echo 'STRATA_API_KEY=sk-你的完整key' >> ~/.hermes/.env
+
+cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh
+chmod +x ~/.hermes/scripts/strata-wrapper.sh
+# config.yaml → mcp_servers.strata-memory.command = wrapper 路径
 ```
 
-**Cursor** — 见 [examples/cursor-mcp.json](examples/cursor-mcp.json)
+更多客户端示例见 [examples/](examples/) · [examples/hermes-config.yaml](examples/hermes-config.yaml)。
 
-**Claude Desktop** — 见 [examples/CLAUDE.md](examples/CLAUDE.md)
+## MCP 工具（10 个，意图聚合）
 
-## 🤖 Agent-Driven Onboarding / 智能引导
+| Tool | 意图 |
+|------|------|
+| `strata_init` | 初始化 SoT + 配置 |
+| `commit_memory` | 经 Quality Kernel 写入事实 |
+| `promote_session` | Scratch → Durable |
+| `recall_context` | 渐进召回（id + 摘要 + 分数） |
+| `expand_memory_detail` | 按 id 二次展开全文 |
+| `strata_doctor` | SoT ↔ 索引一致性巡检 |
+| `strata_rebuild_index` | 从 SQLite 全量重建向量（`confirm=true`） |
+| `strata_stats` | L0–L3 Token 水位线 |
+| `strata_project` | 导出只读 Markdown 投影 |
+| `strata_digest` | 后台降级 / 归档（TTL + 分数） |
 
-首次启动无配置时，宿主 AI 自动读取 `strata://memory/setup-instructions.md`，完成：
+### 写入示例
 
-1. `get_system_profile()` — 静默硬件探测
-2. `search_embedding_recommendations(profile)` — 硬件感知模型匹配
-3. 对话式推荐（本地 vs 云端、隐私 vs 性能）
-4. `apply_memory_config()` — 一键写配置、初始化 Palace、热重载
-
-零 CLI 命令。零手动 JSON 编辑。Agent 主导，用户只需选择。
-
-## 🔧 Tools / 工具
-
-| Tool | 描述 Description |
-|------|-------------|
-| `get_system_profile` | 静默硬件探测 Silent hardware detection |
-| `search_embedding_recommendations` | 硬件感知模型匹配 Hardware-aware model matching |
-| `apply_memory_config` | 应用配置 + 热重载 Config persistence + hot reload |
-| `strata_init` | 手动初始化 Manual init with mode selection |
-| `memorize` | 写入记忆 Write with psych metadata |
-| `wake_up` | 分层唤醒 L0+L1+L2 with CBT defusion |
-| `search` | 主动检索 Semantic search with filters |
-| `get_health` | 系统状态 Runtime status (30s cache) |
-
-详细示例见 [docs/tools.md](docs/tools.md)
-
-## 🧠 Architecture / 架构
-
-```
-L0 (Permanent/永驻)   → Markdown profile     — 核心身份、程序性知识
-L1 (Recent/近期)      → Diary entries         — CBT 重构叙事
-L2 (Semantic/语义)    → ChromaDB + BGE-M3     — 向量检索 (384-dim)
-L3 (Cold/冷归档)      → Markdown archive      — 降级不删除 (Inhibitory Control)
+```json
+{
+  "user_id": "user_001",
+  "memory_type": "user_preference",
+  "fact_claim": "User prefers dark mode in VS Code with Monokai Pro theme.",
+  "confidence_score": 0.92,
+  "session_id": "sess_2026-08-04"
+}
 ```
 
-- **Embedding**: BGE-M3 via SiliconFlow API (MRL 384-dim) 或本地模型
-- **Scoring**: `final_score = base × (1 + log₂(1+usage) × 0.3) × e^salience × decay^days`
-- **Decay / 衰减率**: event=0.85, lesson=0.90, preference=0.95, procedure=0.98, core_identity=1.00
-- **Storage / 存储**: Markdown + YAML frontmatter + ChromaDB + SQLite
-- **Safety / 安全**: CBT 认知扭曲检测、48h 冷却期、负面图式隔离、叙事解离
+### 召回示例
 
-完整架构见 [docs/architecture.md](docs/architecture.md)
-
-## 🔀 Dual Mode / 双模式
-
-| Feature / 特性 | Personal / 个人 | Company / 企业 |
-|---------|----------|---------|
-| CBT safety / 认知安全 | ✅ passive | 默认关闭 |
-| Emotional tracking / 情感追踪 | ✅ | — |
-| AuditLog / 审计日志 | Markdown | Markdown + SQLite |
-| Multi-tenancy / 多租户 | — | Wings 隔离 |
-| PostgreSQL | — | V2 路线图 |
-| Private embedding / 私有部署 | 可选 | 推荐 |
-
-## 📁 Project / 项目结构
-
-```
-strata-memory/
-├── strata_memory/         # 主包
-│   ├── server.py          # MCP Server (8 tools, 5 resources)
-│   ├── config.py          # 双模式配置 + 衰减率
-│   ├── cli.py             # CLI 入口 (init/health/serve)
-│   ├── pipeline/          # memorize / wake / scoring
-│   ├── storage/           # markdown / chroma / triples
-│   ├── embedding/         # BGE-M3 via SiliconFlow
-│   ├── safety/            # CBT 认知安全
-│   ├── audit/             # 审计日志
-│   └── tools/             # Agent-Driven 工具
-├── docs/                  # 架构 + 工具文档
-├── examples/              # 客户端配置示例
-├── .github/               # CI/CD + Issue/PR 模板
-└── tests/                 # 测试
+```json
+{
+  "user_id": "user_001",
+  "query": "IDE theme preferences",
+  "context_depth": "deep",
+  "limit": 8
+}
 ```
 
-详见 [DEVELOPMENT.md](DEVELOPMENT.md)
+返回仅为卡片列表；需要细节时：
 
-## 🔒 Security / 安全
+```json
+{ "user_id": "user_001", "memory_id": "<id from hits>" }
+```
 
-所有数据默认本地存储，零外部上传。详见 [SECURITY.md](SECURITY.md)
+## 禁忌（Quality Kernel 硬拦截）
 
-## 📄 License / 许可证
+- 密码 / API Key / Token
+- 纯情绪发泄、无事实
+- 模糊时间（刚才 / 昨天 / today）— 改用 ISO 日期
+- 将「也许 / 可能 / probably」写成 `factual_truth`
+
+## 架构一览
+
+```
+LLM ─commit_memory─► Quality Kernel ─► CBT Middleware ─► SQLite (SoT)
+                                                    └─► Chroma (rebuildable)
+
+LLM ─recall_context─► Hybrid RRF (vector + FTS5) ─► {id, summary, score}
+LLM ─expand_memory_detail(id)─► detail (scope-checked)
+```
+
+完整说明：[docs/architecture.md](docs/architecture.md) · 工具契约：[docs/tools.md](docs/tools.md)
+
+## 从 0.2.x 迁移
+
+| 0.2.x | 2.0 |
+|-------|-----|
+| `memorize` | `commit_memory` |
+| `wake_up` / `search` | `recall_context` + `expand_memory_detail` |
+| `get_health` | `strata_stats` / `strata_doctor` |
+| Markdown 直写 | SQLite SoT；Markdown 仅投影 |
+
+**批量灌入旧 drawer（不删源文件）：**
+
+```bash
+# 预览
+uv run python -m strata_memory.cli migrate --palace ~/.strata/palace
+
+# 写入 SQLite
+uv run python -m strata_memory.cli migrate --palace ~/.strata/palace --apply
+
+# 写入 + 重建向量索引
+export STRATA_API_KEY=sk-...
+uv run strata-memory-migrate --palace ~/.strata/palace --apply --rebuild-vectors
+```
+
+完整说明：[docs/migration-v02.md](docs/migration-v02.md) · [CHANGELOG.md](CHANGELOG.md)
+
+## 安全
+
+- 默认本地存储；密钥走 `STRATA_API_KEY`，不落盘明文
+- 写操作无裸 CRUD；破坏性重建必须 `confirm=true`
+- 跨 `user_id` / `tenant_id` 的 expand 硬失败
+
+见 [SECURITY.md](SECURITY.md)。
+
+## 开发
+
+```bash
+uv sync --extra dev
+uv run pytest -v
+uv run strata-memory-mcp
+```
+
+## License
 
 MIT — 见 [LICENSE](LICENSE)

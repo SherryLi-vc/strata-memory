@@ -37,6 +37,12 @@ class BGE3SiliconFlowProvider(EmbeddingProvider):
         return results[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not self.api_key or "..." in self.api_key or len(self.api_key) < 20:
+            raise RuntimeError(
+                "SiliconFlow API key missing or redacted "
+                f"(length={len(self.api_key or '')}). "
+                "Set full STRATA_API_KEY (no '...' placeholders)."
+            )
         resp = await self.client.post(
             "/embeddings",
             json={
@@ -44,7 +50,18 @@ class BGE3SiliconFlowProvider(EmbeddingProvider):
                 "input": texts,
             },
         )
-        resp.raise_for_status()
+        if resp.status_code in (401, 403):
+            raise RuntimeError(
+                f"SiliconFlow auth failed HTTP {resp.status_code}. "
+                "Key is present but rejected — usually truncated/redacted key "
+                "from OpenClaw (sk-xxx...yyy) or revoked key. "
+                "Put the FULL key in STRATA_API_KEY and restart MCP."
+            )
+        if resp.status_code >= 400:
+            body = (resp.text or "")[:300]
+            raise RuntimeError(
+                f"SiliconFlow embeddings HTTP {resp.status_code}: {body}"
+            )
         data = resp.json()
         # data["data"] is list of {"embedding": [...], "index": N}
         embeddings = []

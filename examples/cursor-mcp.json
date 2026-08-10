@@ -2,7 +2,11 @@
   "mcpServers": {
     "strata-memory": {
       "command": "uv",
-      "args": ["run", "strata-memory-mcp"]
+      "args": ["run", "--directory", "/ABSOLUTE/PATH/TO/strata-memory", "strata-memory-mcp"],
+      "env": {
+        "STRATA_API_KEY": "sk-your-key",
+        "STRATA_PALACE": "/ABSOLUTE/PATH/TO/palace"
+      }
     }
   }
 }
