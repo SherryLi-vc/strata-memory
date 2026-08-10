@@ -77,6 +77,45 @@ def strata_doctor(
             checks.append({"name": "vector_index", "ok": False, "detail": str(e)})
             issues.append({"severity": "warn", "code": "VECTOR_UNREADABLE", "message": str(e)})
 
+    # Hash duplicates + secret residual sample
+    try:
+        dups = store.find_hash_duplicates(tenant_id=config.tenant_id or "")
+        checks.append({
+            "name": "hash_duplicates",
+            "ok": len(dups) == 0,
+            "detail": {"groups": len(dups), "sample": dups[:5]},
+        })
+        if dups:
+            issues.append({
+                "severity": "warn",
+                "code": "HASH_DUPLICATES",
+                "message": f"{len(dups)} content_hash groups with >1 active row. Run strata_hygiene.",
+            })
+    except Exception as e:
+        issues.append({"severity": "warn", "code": "DUP_SCAN_FAILED", "message": str(e)})
+
+    try:
+        from ..governance.quality_kernel import SECRET_PATTERNS
+        sample = store.iter_for_index(tenant_id=config.tenant_id or "")[:300]
+        secret_n = 0
+        for r in sample:
+            text = r.get("fact_claim") or ""
+            if any(p.search(text) for p in SECRET_PATTERNS):
+                secret_n += 1
+        checks.append({
+            "name": "secret_residual_sample",
+            "ok": secret_n == 0,
+            "detail": {"scanned": len(sample), "hits": secret_n},
+        })
+        if secret_n:
+            issues.append({
+                "severity": "error",
+                "code": "SECRET_RESIDUAL",
+                "message": f"{secret_n} active claims look secret-like. Review via strata_hygiene.",
+            })
+    except Exception as e:
+        issues.append({"severity": "warn", "code": "SECRET_SCAN_FAILED", "message": str(e)})
+
     durable = st.get("active", 0) - st.get("scratch", 0) if st else 0
     if durable < 0:
         durable = st.get("active", 0)

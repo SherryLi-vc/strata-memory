@@ -1,6 +1,7 @@
-"""Production ops tools: doctor, rebuild, stats, projection, migrate."""
+"""Production ops tools: doctor, rebuild, stats, projection, migrate, hygiene."""
 
 from .doctor import strata_doctor
+from .hygiene import strata_hygiene
 from .migrate_v02 import migrate_palace
 from .projection import dump_markdown_projection
 from .rebuild import strata_rebuild_index
@@ -12,4 +13,5 @@ __all__ = [
     "strata_stats",
     "dump_markdown_projection",
     "migrate_palace",
+    "strata_hygiene",
 ]

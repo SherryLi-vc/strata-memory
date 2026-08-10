@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 MEMORIES_DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -48,13 +48,21 @@ CREATE TABLE IF NOT EXISTS memories (
     context_tags        TEXT NOT NULL DEFAULT '[]',
     room                TEXT NOT NULL DEFAULT 'general',
     ttl_seconds         INTEGER,
+    ttl_days            INTEGER,
     expires_at          TEXT,
     valid_from          TEXT,
     valid_to            TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
     last_accessed       TEXT,
-    source              TEXT NOT NULL DEFAULT 'commit_memory'
+    source              TEXT NOT NULL DEFAULT 'commit_memory',
+    supersedes_id       TEXT,
+    superseded_by       TEXT,
+    authority           TEXT NOT NULL DEFAULT 'agent',
+    sensitivity         TEXT NOT NULL DEFAULT 'normal',
+    entity              TEXT NOT NULL DEFAULT '',
+    validator_kind      TEXT NOT NULL DEFAULT 'quality_kernel',
+    provenance          TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_mem_scope
@@ -117,11 +125,13 @@ CREATE INDEX IF NOT EXISTS idx_traj_created ON trajectory(created_at);
 """
 
 # Default TTL (seconds) by memory_type — deterministic, not LLM-chosen.
+# Prefer governance.type_defaults for full policy; keep for backward import.
 DEFAULT_TTL: dict[str, Optional[int]] = {
-    "factual_truth": None,          # permanent until superseded
+    "factual_truth": None,
     "user_preference": None,
     "procedure_rule": None,
-    "episodic_event": 90 * 24 * 3600,  # 90 days
+    "episodic_event": 90 * 24 * 3600,
+    "decision_record": 365 * 24 * 3600,
 }
 
 LAYER_DEFAULT: dict[str, str] = {
@@ -129,7 +139,20 @@ LAYER_DEFAULT: dict[str, str] = {
     "user_preference": "L0",
     "procedure_rule": "L0",
     "episodic_event": "L2",
+    "decision_record": "L1",
 }
+
+# Columns added in schema v3 (ALTER TABLE for existing DBs)
+_V3_COLUMNS: list[tuple[str, str]] = [
+    ("ttl_days", "INTEGER"),
+    ("supersedes_id", "TEXT"),
+    ("superseded_by", "TEXT"),
+    ("authority", "TEXT NOT NULL DEFAULT 'agent'"),
+    ("sensitivity", "TEXT NOT NULL DEFAULT 'normal'"),
+    ("entity", "TEXT NOT NULL DEFAULT ''"),
+    ("validator_kind", "TEXT NOT NULL DEFAULT 'quality_kernel'"),
+    ("provenance", "TEXT NOT NULL DEFAULT '{}'"),
+]
 
 
 def _utcnow() -> str:
@@ -166,6 +189,7 @@ class TruthStore:
     def _init_db(self) -> None:
         with self._conn() as conn:
             conn.executescript(MEMORIES_DDL)
+            self._migrate_schema(conn)
             row = conn.execute(
                 "SELECT value FROM schema_meta WHERE key='version'"
             ).fetchone()
@@ -174,8 +198,11 @@ class TruthStore:
                     "INSERT INTO schema_meta(key, value) VALUES ('version', ?)",
                     (str(SCHEMA_VERSION),),
                 )
-            # FTS triggers (idempotent via IF NOT EXISTS not available for triggers —
-            # drop+recreate is safe for empty companion index tables)
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('version', ?)",
+                    (str(SCHEMA_VERSION),),
+                )
             conn.executescript("""
             CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
               INSERT INTO memories_fts(rowid, id, fact_claim, summary, detail, context_tags)
@@ -192,6 +219,12 @@ class TruthStore:
               VALUES (new.rowid, new.id, new.fact_claim, new.summary, new.detail, new.context_tags);
             END;
             """)
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
+        for name, decl in _V3_COLUMNS:
+            if name not in cols:
+                conn.execute(f"ALTER TABLE memories ADD COLUMN {name} {decl}")
 
     # ── Writes ──────────────────────────────────────────────────────────
 
@@ -214,8 +247,16 @@ class TruthStore:
         context_tags: Optional[list[str]] = None,
         room: str = "general",
         ttl_seconds: Optional[int] = None,
+        ttl_days: Optional[int] = None,
         layer: Optional[str] = None,
         source: str = "commit_memory",
+        supersedes_id: Optional[str] = None,
+        authority: str = "agent",
+        sensitivity: str = "normal",
+        entity: str = "",
+        validator_kind: str = "quality_kernel",
+        provenance: Optional[dict] = None,
+        status: str = "active",
     ) -> dict[str, Any]:
         """Insert a new memory row. Caller must run Quality Kernel first."""
         now = _utcnow()
@@ -223,6 +264,8 @@ class TruthStore:
         tags = context_tags or []
         if ttl_seconds is None:
             ttl_seconds = DEFAULT_TTL.get(memory_type)
+        if ttl_days is None and ttl_seconds is not None:
+            ttl_days = max(1, int(ttl_seconds // 86400))
         expires_at = None
         if ttl_seconds is not None:
             expires_at = (
@@ -234,6 +277,7 @@ class TruthStore:
 
         summary = summary or fact_claim[:240]
         detail = detail or fact_claim
+        prov = json.dumps(provenance or {}, ensure_ascii=False)
 
         with self._conn() as conn:
             conn.execute(
@@ -241,19 +285,135 @@ class TruthStore:
                     id, tenant_id, user_id, session_id, memory_type, fact_claim,
                     summary, detail, confidence, importance, emotional_salience,
                     content_hash, layer, status, is_negative_schema, is_scratch,
-                    usage_count, context_tags, room, ttl_seconds, expires_at,
-                    valid_from, created_at, updated_at, last_accessed, source
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    usage_count, context_tags, room, ttl_seconds, ttl_days, expires_at,
+                    valid_from, created_at, updated_at, last_accessed, source,
+                    supersedes_id, authority, sensitivity, entity, validator_kind,
+                    provenance
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     mid, tenant_id or "", user_id, session_id or "", memory_type,
                     fact_claim, summary, detail, confidence, importance,
-                    emotional_salience, content_hash, layer, "active",
+                    emotional_salience, content_hash, layer, status or "active",
                     1 if is_negative_schema else 0, 1 if is_scratch else 0,
                     0, json.dumps(tags, ensure_ascii=False), room,
-                    ttl_seconds, expires_at, now, now, now, now, source,
+                    ttl_seconds, ttl_days, expires_at, now, now, now, now, source,
+                    supersedes_id, authority or "agent", sensitivity or "normal",
+                    entity or "", validator_kind or "quality_kernel", prov,
                 ),
             )
+            if supersedes_id:
+                conn.execute(
+                    """UPDATE memories
+                       SET status='archived', valid_to=?, updated_at=?,
+                           superseded_by=?
+                       WHERE id=? AND status='active'""",
+                    (now, now, mid, supersedes_id),
+                )
         return self.get_by_id(mid)  # type: ignore[return-value]
+
+    def find_near_duplicates(
+        self,
+        tenant_id: str,
+        user_id: str,
+        claim: str,
+        *,
+        memory_type: str = "",
+        limit: int = 8,
+        min_token_overlap: float = 0.55,
+    ) -> list[dict[str, Any]]:
+        """FTS-assisted near-dup candidates with simple token Jaccard."""
+        tokens = {t.lower() for t in claim.split() if len(t) >= 2}
+        if len(tokens) < 2:
+            return []
+        # Use first few significant tokens for FTS
+        seed = " ".join(sorted(tokens, key=len, reverse=True)[:6])
+        hits = self.fts_search(seed, tenant_id=tenant_id, user_id=user_id, limit=limit)
+        out: list[dict[str, Any]] = []
+        for h in hits:
+            if memory_type and h.get("memory_type") != memory_type:
+                continue
+            other = {t.lower() for t in (h.get("fact_claim") or "").split() if len(t) >= 2}
+            if not other:
+                continue
+            inter = len(tokens & other)
+            union = len(tokens | other) or 1
+            jacc = inter / union
+            if jacc >= min_token_overlap:
+                h = dict(h)
+                h["jaccard"] = round(jacc, 4)
+                out.append(h)
+        out.sort(key=lambda x: x.get("jaccard", 0), reverse=True)
+        return out
+
+    def list_expired(
+        self,
+        *,
+        tenant_id: str = "",
+        user_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        now = _utcnow()
+        parts = [
+            "SELECT * FROM memories WHERE status='active' AND valid_to IS NULL",
+            "AND expires_at IS NOT NULL AND expires_at <= ?",
+            "AND tenant_id=?",
+        ]
+        params: list[Any] = [now, tenant_id or ""]
+        if user_id:
+            parts.append("AND user_id=?")
+            params.append(user_id)
+        safe = max(1, min(int(limit), 500))
+        parts.append(f"ORDER BY expires_at ASC LIMIT {safe}")
+        with self._conn() as conn:
+            rows = conn.execute(" ".join(parts), params).fetchall()
+        return [dict(r) for r in rows]
+
+    def find_hash_duplicates(
+        self,
+        *,
+        tenant_id: str = "",
+        user_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        parts = [
+            """SELECT content_hash, COUNT(*) AS n, GROUP_CONCAT(id) AS ids
+               FROM memories
+               WHERE status='active' AND valid_to IS NULL AND tenant_id=?""",
+        ]
+        params: list[Any] = [tenant_id or ""]
+        if user_id:
+            parts.append("AND user_id=?")
+            params.append(user_id)
+        parts.append("GROUP BY content_hash HAVING n > 1 ORDER BY n DESC LIMIT 50")
+        with self._conn() as conn:
+            rows = conn.execute(" ".join(parts), params).fetchall()
+        return [
+            {"content_hash": r["content_hash"], "count": r["n"], "ids": (r["ids"] or "").split(",")}
+            for r in rows
+        ]
+
+    def rebuild_fts(self) -> dict[str, Any]:
+        """Rebuild FTS5 content from memories (companion index hygiene)."""
+        with self._conn() as conn:
+            try:
+                conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+                n = conn.execute("SELECT COUNT(*) AS n FROM memories_fts").fetchone()["n"]
+                return {"status": "ok", "fts_rows": n}
+            except sqlite3.OperationalError as e:
+                # Fallback: delete + reinsert via triggers by touching rows
+                try:
+                    conn.execute("DELETE FROM memories_fts")
+                    rows = conn.execute(
+                        "SELECT rowid, id, fact_claim, summary, detail, context_tags FROM memories"
+                    ).fetchall()
+                    for r in rows:
+                        conn.execute(
+                            """INSERT INTO memories_fts(rowid, id, fact_claim, summary, detail, context_tags)
+                               VALUES (?,?,?,?,?,?)""",
+                            (r["rowid"], r["id"], r["fact_claim"], r["summary"], r["detail"], r["context_tags"]),
+                        )
+                    return {"status": "ok", "fts_rows": len(rows), "mode": "manual_reinsert"}
+                except Exception as e2:
+                    return {"status": "error", "message": f"{e}; fallback={e2}"}
 
     def find_by_hash(
         self, tenant_id: str, user_id: str, content_hash: str
@@ -474,6 +634,11 @@ class TruthStore:
                    FROM memories WHERE status='active'"""
             ).fetchone()["chars"]
         layers = self.count_by_layer()
+        with self._conn() as conn:
+            ver = conn.execute(
+                "SELECT value FROM schema_meta WHERE key='version'"
+            ).fetchone()
+            db_ver = int(ver["value"]) if ver else 0
         return {
             "active": total,
             "archived": archived,
@@ -485,6 +650,7 @@ class TruthStore:
             "tokens_approx": max(0, int(tokens_approx) // 3),
             "db_path": str(self.db_path),
             "schema_version": SCHEMA_VERSION,
+            "db_schema_version": db_ver,
         }
 
     def candidates_for_digest(self, older_than_days: int = 30) -> list[dict[str, Any]]:

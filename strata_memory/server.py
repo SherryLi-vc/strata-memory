@@ -45,7 +45,13 @@ from .config import (
 )
 from .embedding import EmbeddingProvider
 from .governance import ToolError, error_payload
-from .ops import dump_markdown_projection, strata_doctor, strata_rebuild_index, strata_stats
+from .ops import (
+    dump_markdown_projection,
+    strata_doctor,
+    strata_hygiene,
+    strata_rebuild_index,
+    strata_stats,
+)
 from .pipeline.commit import commit_memory as pipeline_commit
 from .pipeline.commit import promote_session as pipeline_promote
 from .pipeline.digest import run_digest
@@ -255,8 +261,9 @@ async def handle_list_tools() -> list[Tool]:
                             "user_preference",
                             "procedure_rule",
                             "episodic_event",
+                            "decision_record",
                         ],
-                        "description": "严格类型；系统据此分配 TTL 与默认层级。",
+                        "description": "严格类型；系统强制注入 TTL/status/validator_kind。",
                     },
                     "fact_claim": {
                         "type": "string",
@@ -286,6 +293,15 @@ async def handle_list_tools() -> list[Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "状态依赖检索标签。",
+                    },
+                    "entity": {
+                        "type": "string",
+                        "description": "可选实体键，便于相关记忆关联。",
+                    },
+                    "supersede": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "近重复时归档旧行并写 supersedes_id 版本链。",
                     },
                 },
                 "required": ["user_id", "memory_type", "fact_claim", "confidence_score"],
@@ -336,6 +352,11 @@ async def handle_list_tools() -> list[Tool]:
                         "type": "string",
                         "enum": ["shallow", "deep"],
                         "default": "deep",
+                    },
+                    "current_turn_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "true=优先当前 session，抑制跨会话旧话题注入。",
                     },
                 },
                 "required": ["user_id", "query"],
@@ -436,6 +457,23 @@ async def handle_list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="strata_hygiene",
+            description=_d(
+                "运维卫生：扫描 hash 重复、secret 残留、过期 TTL；可选归档过期与重建 FTS。",
+                "doctor 报警后、迁移后、或夜间巡检时。",
+                "默认 dry_run=true。archive 过期需 dry_run=false。禁止把 secret_hits 原文贴进公开日志。",
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {"type": "boolean", "default": True},
+                    "archive_expired": {"type": "boolean", "default": True},
+                    "rebuild_fts": {"type": "boolean", "default": False},
+                    "user_id": {"type": "string"},
+                },
+            },
+        ),
     ]
 
 
@@ -500,6 +538,8 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = _handle_project(args)
         elif name == "strata_digest":
             result = _handle_digest(args)
+        elif name == "strata_hygiene":
+            result = _handle_hygiene(args)
         else:
             status = "error"
             err_code = "UNKNOWN_TOOL"
@@ -509,7 +549,8 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
                 fix=(
                     "Use one of: strata_init, commit_memory, promote_session, "
                     "recall_context, expand_memory_detail, strata_doctor, "
-                    "strata_rebuild_index, strata_stats, strata_project, strata_digest."
+                    "strata_rebuild_index, strata_stats, strata_project, "
+                    "strata_digest, strata_hygiene."
                 ),
             )
         if isinstance(result, dict) and result.get("status") == "error":
@@ -663,7 +704,8 @@ async def _handle_commit(args: dict) -> dict:
             f"Missing: {', '.join(missing)}",
             fix=(
                 "commit_memory(user_id, memory_type, fact_claim, confidence_score). "
-                "memory_type ∈ factual_truth|user_preference|procedure_rule|episodic_event."
+                "memory_type ∈ factual_truth|user_preference|procedure_rule|"
+                "episodic_event|decision_record."
             ),
             fields={"missing": missing},
         )
@@ -681,6 +723,8 @@ async def _handle_commit(args: dict) -> dict:
         room=str(args.get("room") or "general"),
         context_tags=args.get("context_tags") or [],
         is_scratch=bool(args.get("is_scratch", False)),
+        entity=str(args.get("entity") or ""),
+        supersede=bool(args.get("supersede", True)),
     )
     if embed_warning:
         result["vector_index_warning"] = embed_warning
@@ -743,6 +787,7 @@ async def _handle_recall(args: dict) -> dict:
         session_id=str(args.get("session_id") or ""),
         limit=int(args.get("limit") or 8),
         context_depth=str(args.get("context_depth") or "deep"),
+        current_turn_only=bool(args.get("current_turn_only", False)),
     )
 
 
@@ -829,6 +874,20 @@ def _handle_digest(args: dict) -> dict:
     if not is_initialized():
         return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
     return run_digest(store, config, dry_run=bool(args.get("dry_run", True)))
+
+
+def _handle_hygiene(args: dict) -> dict:
+    config, store, *_ = _get_state()
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    return strata_hygiene(
+        config=config,
+        store=store,
+        dry_run=bool(args.get("dry_run", True)),
+        archive_expired=bool(args.get("archive_expired", True)),
+        rebuild_fts=bool(args.get("rebuild_fts", False)),
+        user_id=str(args.get("user_id") or ""),
+    )
 
 
 def _onboarding_md() -> str:

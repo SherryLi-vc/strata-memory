@@ -85,6 +85,7 @@ chmod +x ~/.hermes/scripts/strata-wrapper.sh
 | `strata_stats` | L0–L3 Token 水位线 |
 | `strata_project` | 导出只读 Markdown 投影 |
 | `strata_digest` | 后台降级 / 归档（TTL + 分数） |
+| `strata_hygiene` | 过期/重复/secret 卫生扫描与可选修复 |
 
 ### 写入示例
 

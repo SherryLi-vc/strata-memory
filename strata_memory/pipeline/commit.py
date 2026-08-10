@@ -1,19 +1,16 @@
-"""commit_memory pipeline — bulletproof write path (2.0).
+"""commit_memory pipeline — bulletproof write path (2.0 + 3.0 Slice C).
 
-Flow (all deterministic after LLM proposes claim):
-  1. Quality Kernel validates claim + injects hash/TTL/layer
-  2. CBT middleware detects negative schemas + redacts secrets
-  3. Dedup against Truth Store (SQLite)
-  4. Insert SoT row
-  5. Embed + upsert rebuildable vector companion (skip if scratch/no embed)
-  6. Audit + trajectory
-
-LLM never touches raw filesystem or raw SQL.
+Flow:
+  1. Quality Kernel (+ typed TTL/status/validator_kind defaults)
+  2. CBT middleware
+  3. Exact hash dedup
+  4. Near-dup FTS → supersede version chain
+  5. Insert SoT with provenance
+  6. Optional embed
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Optional
 
 from ..config import Config
@@ -39,6 +36,11 @@ async def commit_memory(
     context_tags: Optional[list[str]] = None,
     is_scratch: bool = False,
     importance: Optional[float] = None,
+    entity: str = "",
+    authority: str = "",
+    sensitivity: str = "",
+    supersede: bool = True,
+    provenance: Optional[dict] = None,
 ) -> dict[str, Any]:
     if not user_id or not str(user_id).strip():
         raise ToolError(
@@ -57,6 +59,7 @@ async def commit_memory(
         importance=importance,
     )
     verdict.raise_if_rejected()
+    meta = verdict.metadata or {}
 
     cbt = CBTMiddleware(
         enabled=config.cbt.enabled and config.cbt.detect_distortions,
@@ -64,11 +67,9 @@ async def commit_memory(
     )
     assessment = cbt.assess(verdict.fact_claim)
     claim = assessment.redacted_text or verdict.fact_claim
-
-    # Re-hash after redaction
     content_hash = QualityKernel.content_hash(claim)
 
-    # Dedup: exact content hash within tenant+user
+    # Exact dedup
     existing = store.find_by_hash(tenant_id, user_id, content_hash)
     if existing:
         store.touch(existing["id"])
@@ -84,19 +85,50 @@ async def commit_memory(
             {
                 "memory_id": existing["id"],
                 "deduplicated": True,
+                "superseded": False,
                 "layer": existing["layer"],
                 "is_scratch": bool(existing["is_scratch"]),
                 "usage_count": existing["usage_count"] + 1,
+                "validator_kind": meta.get("validator_kind"),
+                "ttl_days": meta.get("ttl_days"),
             },
             message="Duplicate memory — usage_count incremented, no new row.",
         )
 
-    # Negative schema: force scratch/cooling — never L0
+    # Near-dup → supersede (version chain)
+    supersedes_id = None
+    near = []
+    if supersede and not verdict.is_scratch:
+        near = store.find_near_duplicates(
+            tenant_id,
+            user_id,
+            claim,
+            memory_type=verdict.memory_type,
+            limit=5,
+            min_token_overlap=0.55,
+        )
+        # Prefer highest jaccard that is not identical hash (already handled)
+        for cand in near:
+            if cand.get("content_hash") == content_hash:
+                continue
+            if float(cand.get("jaccard") or 0) >= 0.55:
+                supersedes_id = cand["id"]
+                break
+
     force_scratch = verdict.is_scratch
     layer = verdict.layer
     if assessment.is_negative_schema:
         force_scratch = True
         layer = "scratch"
+        supersedes_id = None  # never supersede L0 via negative content
+
+    prov = dict(provenance or {})
+    prov.setdefault("session_id", session_id or "")
+    prov.setdefault("pipeline", "commit_memory")
+    if supersedes_id:
+        prov["supersede_of"] = supersedes_id
+        if near:
+            prov["near_jaccard"] = near[0].get("jaccard")
 
     row = store.insert_memory(
         tenant_id=tenant_id,
@@ -107,7 +139,7 @@ async def commit_memory(
         content_hash=content_hash,
         confidence=verdict.confidence,
         importance=verdict.importance,
-        emotional_salience=0.0,  # set below if scoring available
+        emotional_salience=0.0,
         summary=verdict.summary if claim == verdict.fact_claim else claim[:240],
         detail=claim,
         is_negative_schema=assessment.is_negative_schema,
@@ -115,11 +147,18 @@ async def commit_memory(
         context_tags=context_tags,
         room=room or "general",
         ttl_seconds=verdict.ttl_seconds,
+        ttl_days=meta.get("ttl_days"),
         layer=layer,
         source="commit_memory",
+        supersedes_id=supersedes_id,
+        authority=authority or meta.get("authority") or "agent",
+        sensitivity=sensitivity or meta.get("sensitivity") or "normal",
+        entity=entity or "",
+        validator_kind=meta.get("validator_kind") or "quality_kernel",
+        provenance=prov,
+        status=meta.get("status") or "active",
     )
 
-    # Optional emotional salience (keyword) — deterministic
     try:
         from .scoring import estimate_emotional_salience
         sal = estimate_emotional_salience(claim)
@@ -133,7 +172,6 @@ async def commit_memory(
     except Exception:
         pass
 
-    # Vector companion — only durable non-negative (or allow negative with flag)
     indexed = False
     if (
         not force_scratch
@@ -158,6 +196,7 @@ async def commit_memory(
                     "importance": verdict.importance,
                     "is_negative_schema": False,
                     "context_tags": ",".join(context_tags or []),
+                    "entity": entity or "",
                     "wing": f"users/{user_id}",
                     "category": _type_to_legacy_category(verdict.memory_type),
                     "date": row["created_at"][:10],
@@ -166,8 +205,13 @@ async def commit_memory(
                 embeddings=[vec],
             )
             indexed = True
+            # Drop superseded vector companion if present
+            if supersedes_id:
+                try:
+                    chroma.delete_by_ids([supersedes_id])
+                except Exception:
+                    pass
         except Exception as e:
-            # Index failure must NOT roll back SoT — rebuildable companion
             store.audit(
                 "index_warning",
                 tenant_id=tenant_id,
@@ -182,30 +226,46 @@ async def commit_memory(
         user_id=user_id,
         session_id=session_id,
         target=row["id"],
-        summary=f"type={verdict.memory_type} layer={layer} scratch={force_scratch}",
+        summary=(
+            f"type={verdict.memory_type} layer={layer} scratch={force_scratch} "
+            f"supersedes={supersedes_id or '-'}"
+        ),
         after=claim[:200],
     )
+
+    msg = "Memory committed to Truth Store (SQLite)."
+    if supersedes_id:
+        msg += f" Superseded prior memory {supersedes_id} (version chain)."
+    if assessment.is_negative_schema:
+        msg += " Held in cooling sandbox."
+    elif force_scratch:
+        msg += " Session scratch — call promote_session to make durable."
 
     return success_payload(
         {
             "memory_id": row["id"],
             "deduplicated": False,
+            "superseded": bool(supersedes_id),
+            "supersedes_id": supersedes_id,
             "memory_type": verdict.memory_type,
             "layer": layer,
             "is_scratch": force_scratch,
             "is_negative_schema": assessment.is_negative_schema,
             "cooling_hours": config.cbt.cooling_hours if assessment.is_negative_schema else 0,
             "ttl_seconds": verdict.ttl_seconds,
+            "ttl_days": meta.get("ttl_days"),
+            "memory_status": meta.get("status", "active"),
+            "validator_kind": meta.get("validator_kind"),
+            "authority": authority or meta.get("authority"),
+            "sensitivity": sensitivity or meta.get("sensitivity"),
+            "entity": entity or None,
             "confidence": verdict.confidence,
             "indexed": indexed,
             "summary": row.get("summary") or claim[:240],
             "cbt_hint": assessment.reframed_hint or None,
+            "provenance": prov,
         },
-        message=(
-            "Memory committed to Truth Store (SQLite)."
-            + (" Held in cooling sandbox." if assessment.is_negative_schema else "")
-            + (" Session scratch — call promote_session to make durable." if force_scratch and not assessment.is_negative_schema else "")
-        ),
+        message=msg,
     )
 
 
@@ -215,6 +275,7 @@ def _type_to_legacy_category(memory_type: str) -> str:
         "user_preference": "preference",
         "procedure_rule": "procedure",
         "episodic_event": "event",
+        "decision_record": "goal",
     }.get(memory_type, "fact")
 
 
@@ -238,7 +299,6 @@ async def promote_session(
     tenant_id = tenant_id or config.tenant_id or ""
     ids = store.promote_scratch(tenant_id, user_id, session_id)
 
-    # Re-index newly durable rows
     indexed = 0
     if embed_provider and chroma:
         for mid in ids:
@@ -263,6 +323,7 @@ async def promote_session(
                         "date": (row.get("created_at") or "")[:10],
                         "is_negative_schema": False,
                         "context_tags": "",
+                        "entity": row.get("entity") or "",
                     }],
                     ids=[mid],
                     embeddings=[vec],

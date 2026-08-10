@@ -1,8 +1,9 @@
 """Write-time governance: Quality Kernel, CBT middleware, LLM-facing errors."""
 
+from .cbt_middleware import CBTMiddleware, RedactionResult
 from .errors import ToolError, error_payload, success_payload
 from .quality_kernel import QualityKernel, QualityVerdict
-from .cbt_middleware import CBTMiddleware, RedactionResult
+from .type_defaults import MEMORY_TYPES, TYPE_DEFAULTS, defaults_for
 
 __all__ = [
     "ToolError",
@@ -12,4 +13,7 @@ __all__ = [
     "QualityVerdict",
     "CBTMiddleware",
     "RedactionResult",
+    "MEMORY_TYPES",
+    "TYPE_DEFAULTS",
+    "defaults_for",
 ]

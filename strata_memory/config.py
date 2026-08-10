@@ -62,7 +62,7 @@ class AuditConfig(BaseModel):
 
 class Config(BaseModel):
     palace_path: str = ""
-    version: str = "2.0.0"
+    version: str = "2.1.0"
 
     mode: str = "personal"  # personal | company
     tenant_id: str = ""

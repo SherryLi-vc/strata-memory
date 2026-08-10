@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.1.0] — 2026-08-10
+
+### Memory 3.0 Slice C (engineering maturity)
+- **decision_record** type + forced typed TTL/status/validator_kind defaults
+- **Near-dup supersede** version chain (`supersedes_id` / `superseded_by`)
+- **Provenance** JSON + authority/sensitivity/entity columns (schema v3)
+- **Multi-signal rerank** on RRF with `score_breakdown` + `filtered` reasons
+- **current_turn_only** session filter on `recall_context`
+- **strata_hygiene** tool: expired archive, hash dups, secret scan, FTS rebuild
+- **strata_doctor** reports hash duplicates and secret residuals
+
 ## [2.0.1] — 2026-08-09
 
 ### Fixed (Hermes / SiliconFlow key chain)

@@ -19,13 +19,9 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .errors import ToolError
+from .type_defaults import MEMORY_TYPES, defaults_for
 
-VALID_MEMORY_TYPES = frozenset({
-    "factual_truth",
-    "user_preference",
-    "procedure_rule",
-    "episodic_event",
-})
+VALID_MEMORY_TYPES = MEMORY_TYPES
 
 # Relative / fuzzy temporal language that must be grounded before commit.
 FUZZY_TIME_PATTERNS = re.compile(
@@ -125,7 +121,7 @@ class QualityKernel:
                 reject_message=f"memory_type={mtype!r} is not allowed.",
                 fix=(
                     "Use one of: factual_truth | user_preference | "
-                    "procedure_rule | episodic_event."
+                    "procedure_rule | episodic_event | decision_record."
                 ),
             )
 
@@ -215,20 +211,14 @@ class QualityKernel:
                     fix="Do not persist uncertain claims. Re-verify with user, then retry.",
                 )
 
-        # Importance defaults by type
-        type_importance = {
-            "factual_truth": 0.7,
-            "user_preference": 0.75,
-            "procedure_rule": 0.8,
-            "episodic_event": 0.45,
-        }
-        imp = float(importance) if importance is not None else type_importance.get(mtype, 0.5)
+        # Typed defaults injected at write boundary (LLM may omit)
+        td = defaults_for(mtype)
+        imp = float(importance) if importance is not None else float(td.get("importance", 0.5))
         imp = max(0.0, min(1.0, imp))
 
-        from ..storage.truth_store import DEFAULT_TTL, LAYER_DEFAULT
-
-        ttl = DEFAULT_TTL.get(mtype)
-        layer = "scratch" if force_scratch else LAYER_DEFAULT.get(mtype, "L2")
+        ttl = td.get("ttl_seconds")
+        ttl_days = td.get("ttl_days")
+        layer = "scratch" if force_scratch else td.get("layer", "L2")
 
         summary = claim if len(claim) <= 240 else claim[:237] + "..."
         chash = self.content_hash(claim)
@@ -244,5 +234,12 @@ class QualityKernel:
             ttl_seconds=ttl,
             layer=layer,
             is_scratch=force_scratch,
-            metadata={"min_confidence": self.min_confidence},
+            metadata={
+                "min_confidence": self.min_confidence,
+                "status": td.get("status", "active"),
+                "ttl_days": ttl_days,
+                "validator_kind": td.get("validator_kind", "quality_kernel"),
+                "authority": td.get("authority", "agent"),
+                "sensitivity": td.get("sensitivity", "normal"),
+            },
         )

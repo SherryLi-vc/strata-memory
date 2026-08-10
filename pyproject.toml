@@ -1,6 +1,6 @@
 [project]
 name = "strata-memory-mcp"
-version = "2.0.1"
+version = "2.1.0"
 description = "Industrial AI memory base for Agents via MCP: SQLite SoT, rebuildable vectors, progressive recall, defensive tool contracts."
 readme = "README.md"
 requires-python = ">=3.11"
