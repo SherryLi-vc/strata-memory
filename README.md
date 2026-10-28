@@ -1,8 +1,19 @@
 # Strata Memory 2.0（分层记忆 · 工业级 AI 记忆基座）
 
 <p align="center">
+  <a href="./assets/brand/README.md">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./assets/brand/extensions/lockup_dark_transparent.svg">
+      <img alt="strata-memory" src="./assets/brand/extensions/lockup_light_transparent.svg" width="420">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
   <img src="./assets/memory.png" alt="Strata Memory" width="80%">
 </p>
+
+标志文件（Agensi 用 512 召回点图标、无点 favicon、横版 lockup、wordmark）见 [assets/brand/](assets/brand/README.md)。
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.org)

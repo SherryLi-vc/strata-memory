@@ -252,3 +252,4 @@ Hard rejects:
 - Tool contracts: https://github.com/SherryLi-vc/strata-memory/blob/main/docs/tools.md
 - Security: https://github.com/SherryLi-vc/strata-memory/blob/main/SECURITY.md
 - Changelog: https://github.com/SherryLi-vc/strata-memory/blob/main/CHANGELOG.md
+- Brand marks: https://github.com/SherryLi-vc/strata-memory/blob/main/assets/brand/README.md — Agensi listing icon is `assets/brand/extensions/icon_light_transparent_512.png` (recall dot, 512). Use `icon_dark_transparent_512.png` on a dark tile.
