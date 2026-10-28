@@ -19,6 +19,7 @@ class EmbeddingProvider(ABC):
         self.base_url = base_url
         self.api_key = api_key
         self.dimension = dimension
+        self.backend = "http"
 
     @abstractmethod
     async def embed(self, text: str) -> list[float]:

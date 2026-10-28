@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.2.1] — 2026-10-28
+
+### Packaging
+- Distribution name stays `strata-memory-mcp`. `strata-memory` on PyPI is a different project.
+- `mcp` is pinned to `>=1.0.0,<2`. mcp 2.x removed `Server.list_tools`.
+- CI installs the wheel into a clean venv with no lockfile and smoke-tests `--help`, `setup`, and an MCP handshake.
+
+### Embeddings
+- Host snippets do not set `STRATA_EMBEDDING_PROVIDER`.
+- The vector index stores provider, model, dimension, and backend. A mismatch refuses vector use until rebuild.
+- A saved config that only sets `provider` uses that provider's model and URL. A palace file with no embedding block stays on SiliconFlow. A missing config file still defaults to local.
+- `strata_init` and `strata_doctor` report the effective provider, model, and backend.
+- A semantic local model that cannot download fails with a short message. `STRATA_LOCAL_EMBED_BACKEND=hash` opts into hashing. `STRATA_EMBEDDING_HASH_FALLBACK=1` falls back after a failed download.
+
+### Forget and export
+- `forget_memory` deletes the supersede chain by default (`include_chain=false` keeps a single row).
+- Audit rows for forgotten ids stay, with fact text replaced by `[redacted]`.
+- Forget and export return `total`, `remaining`, and `next_offset`.
+
 ## [2.2.0] — 2026-10-28
 
 ### Recall
@@ -13,7 +32,7 @@
 - `export_memories` and `strata-memory export` write a JSON document for one user/tenant.
 
 ### Install
-- Project name is `strata-memory`. `uvx strata-memory` starts the MCP server. `strata-memory-mcp` remains.
+- Distribution name is `strata-memory-mcp`. `uvx strata-memory` is a different PyPI project.
 - Default embedding provider is `local` (no API key). Without the `local` extra, embeddings are an offline hashing fallback. `config.json` values already saved for another provider are left alone.
 - `strata-memory setup --host cursor|claude-code|claude-desktop` prints a snippet.
 

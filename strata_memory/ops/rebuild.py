@@ -6,6 +6,7 @@ import shutil
 from typing import Any
 
 from ..config import Config
+from ..embedder_stamp import identity_for, write_stamp
 from ..embedding import EmbeddingProvider
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
@@ -106,6 +107,12 @@ async def strata_rebuild_index(
         tenant_id=tenant_id,
         summary=f"rebuilt ok={ok} failed={failed} source_rows={len(rows)}",
     )
+    ident = identity_for(config.embedding, embed_provider)
+    write_stamp(persist, ident)
+    try:
+        vector_count = new_chroma.count()
+    except Exception:
+        vector_count = None
 
     return {
         "status": "ok",
@@ -114,6 +121,7 @@ async def strata_rebuild_index(
         "indexed": ok,
         "failed": failed,
         "errors_sample": errors,
-        "vector_count": new_chroma.count(),
+        "vector_count": vector_count,
+        "embedder": ident,
         "persist_dir": str(persist),
     }

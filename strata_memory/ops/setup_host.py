@@ -1,6 +1,10 @@
-"""Print an MCP host snippet that runs ``uvx strata-memory`` offline.
+"""Print an MCP host snippet for ``uvx strata-memory-mcp``.
 
-No API key is included. Cloud embedding stays an explicit opt-in.
+The snippet does not set ``STRATA_EMBEDDING_PROVIDER``. An environment value
+overrides ``config.json``, so hard-coding ``local`` would silently retarget
+an existing SiliconFlow palace onto a different embedder at the same dimension.
+
+``uvx strata-memory`` is a different PyPI project. Do not use that name.
 """
 
 from __future__ import annotations
@@ -15,10 +19,9 @@ _CURSOR = """\
     "strata-memory": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["strata-memory"],
+      "args": ["strata-memory-mcp"],
       "env": {
-        "STRATA_PALACE": "${userHome}/.strata/palace",
-        "STRATA_EMBEDDING_PROVIDER": "local"
+        "STRATA_PALACE": "${userHome}/.strata/palace"
       }
     }
   }
@@ -30,10 +33,9 @@ _CLAUDE_CODE = """\
   "mcpServers": {
     "strata-memory": {
       "command": "uvx",
-      "args": ["strata-memory"],
+      "args": ["strata-memory-mcp"],
       "env": {
-        "STRATA_PALACE": "${STRATA_PALACE:-~/.strata/palace}",
-        "STRATA_EMBEDDING_PROVIDER": "local"
+        "STRATA_PALACE": "${STRATA_PALACE:-~/.strata/palace}"
       }
     }
   }
@@ -41,16 +43,13 @@ _CLAUDE_CODE = """\
 """
 
 _CLAUDE_DESKTOP = """\
-# Claude Desktop does not expand ${VAR}. Replace the palace path if needed.
-# If uvx is not on the app PATH, set command to the absolute uvx binary.
 {
   "mcpServers": {
     "strata-memory": {
       "command": "uvx",
-      "args": ["strata-memory"],
+      "args": ["strata-memory-mcp"],
       "env": {
-        "STRATA_PALACE": "~/.strata/palace",
-        "STRATA_EMBEDDING_PROVIDER": "local"
+        "STRATA_PALACE": "~/.strata/palace"
       }
     }
   }
@@ -59,7 +58,7 @@ _CLAUDE_DESKTOP = """\
 
 
 def render_setup(host: HostName) -> str:
-    """Return the snippet for one supported host."""
+    """Return the snippet for one supported host. The text is JSON."""
     if host == "cursor":
         return _CURSOR
     if host == "claude-code":

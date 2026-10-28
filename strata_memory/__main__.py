@@ -1,13 +1,12 @@
-"""Entry point for `strata-memory` and `strata-memory-mcp`.
+"""Entry point for the ``strata-memory-mcp`` command.
 
-`uvx strata-memory` starts the MCP server. Subcommands (setup, export, …)
-are handled by the CLI. `strata-memory-mcp` always serves, so existing host
-configs keep working.
+No arguments starts the MCP server. ``setup``, ``export``, ``--help``, and the
+other subcommands go to the CLI. The PyPI distribution name is
+``strata-memory-mcp``. ``uvx strata-memory`` is a different package.
 """
 
 import asyncio
 import sys
-from pathlib import Path
 
 from .cli import main as cli_main
 from .server import run
@@ -29,10 +28,6 @@ _CLI_COMMANDS = {
 
 
 def main() -> None:
-    argv0 = Path(sys.argv[0]).name.lower()
-    if "strata-memory-mcp" in argv0:
-        asyncio.run(run())
-        return
     if len(sys.argv) > 1 and sys.argv[1] in _CLI_COMMANDS:
         cli_main()
         return

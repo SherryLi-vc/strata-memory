@@ -2,10 +2,9 @@
   "mcpServers": {
     "strata-memory": {
       "command": "uvx",
-      "args": ["strata-memory"],
+      "args": ["strata-memory-mcp"],
       "env": {
-        "STRATA_PALACE": "~/.strata/palace",
-        "STRATA_EMBEDDING_PROVIDER": "local"
+        "STRATA_PALACE": "~/.strata/palace"
       }
     }
   }

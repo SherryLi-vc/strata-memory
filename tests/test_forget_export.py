@@ -162,6 +162,104 @@ def test_forget_respects_user_tenant_and_session(env):
     assert store.get_by_id(other_session["memory_id"]) is not None
 
 
+def test_forget_drops_the_supersede_chain_and_redacts_audit(env):
+    cfg, store, chroma = env
+    older = store.insert_memory(
+        tenant_id="",
+        user_id="user_a",
+        session_id="",
+        memory_type="factual_truth",
+        fact_claim="The API gateway listens on port 8017 in production.",
+        content_hash="chain-old",
+        confidence=0.9,
+    )
+    newer = store.insert_memory(
+        tenant_id="",
+        user_id="user_a",
+        session_id="",
+        memory_type="factual_truth",
+        fact_claim="The API gateway listens on port 8020 in production.",
+        content_hash="chain-new",
+        confidence=0.95,
+        supersedes_id=older["id"],
+    )
+    store.audit(
+        "commit_memory",
+        user_id="user_a",
+        target=newer["id"],
+        after=newer["fact_claim"],
+        summary="committed port 8020",
+    )
+    forgotten = forget_memories(store=store, chroma=chroma, user_id="user_a", memory_id=newer["id"])
+    assert older["id"] in forgotten["deleted_ids"]
+    assert newer["id"] in forgotten["deleted_ids"]
+    assert store.get_by_id(older["id"]) is None
+    with store._conn() as conn:
+        snaps = conn.execute("SELECT action, summary, after_snap FROM audit_log").fetchall()
+    blob = " ".join(f"{row['summary']} {row['after_snap']}" for row in snaps)
+    assert "8020" not in blob
+    assert "8017" not in blob
+    assert any(row["action"] == "commit_memory" for row in snaps)
+
+    kept_old = store.insert_memory(
+        tenant_id="",
+        user_id="user_a",
+        session_id="",
+        memory_type="user_preference",
+        fact_claim="User prefers the Monokai Pro theme with dark mode.",
+        content_hash="keep-old",
+        confidence=0.9,
+    )
+    kept_new = store.insert_memory(
+        tenant_id="",
+        user_id="user_a",
+        session_id="",
+        memory_type="user_preference",
+        fact_claim="User prefers the Solarized theme with dark mode.",
+        content_hash="keep-new",
+        confidence=0.95,
+        supersedes_id=kept_old["id"],
+    )
+    only_new = forget_memories(
+        store=store,
+        chroma=chroma,
+        user_id="user_a",
+        memory_id=kept_new["id"],
+        include_chain=False,
+    )
+    assert only_new["deleted_ids"] == [kept_new["id"]]
+    assert store.get_by_id(kept_old["id"]) is not None
+
+
+def test_export_reports_remaining_pages(env):
+    cfg, store, _chroma = env
+    _commit(
+        cfg,
+        store,
+        user_id="user_a",
+        memory_type="factual_truth",
+        fact_claim="First export row mentions port 8017 only.",
+    )
+    _commit(
+        cfg,
+        store,
+        user_id="user_a",
+        memory_type="factual_truth",
+        fact_claim="Second export row mentions the Monokai Pro theme only.",
+        supersede=False,
+    )
+    page = export_memories(store=store, user_id="user_a", limit=1, offset=0)
+    assert page["total"] == 2
+    assert page["count"] == 1
+    assert page["remaining"] == 1
+    assert page["next_offset"] == 1
+    nxt = export_memories(store=store, user_id="user_a", limit=1, offset=page["next_offset"])
+    assert nxt["count"] == 1
+    assert nxt["remaining"] == 0
+    assert nxt["next_offset"] is None
+    assert page["memories"][0]["id"] != nxt["memories"][0]["id"]
+
+
 def test_export_is_scoped_json(env):
     cfg, store, _chroma = env
     _commit(

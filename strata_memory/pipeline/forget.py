@@ -19,6 +19,12 @@ def _scope_tenant(row_tenant: str, tenant_id: str) -> bool:
     return (row_tenant or "") == (tenant_id or "")
 
 
+def _page_bounds(limit: int, offset: int) -> tuple[int, int]:
+    page = max(1, min(int(limit or 2000), 2000))
+    start = max(0, int(offset or 0))
+    return page, start
+
+
 def forget_memories(
     *,
     store: TruthStore,
@@ -31,6 +37,9 @@ def forget_memories(
     query: str = "",
     match_all: bool = False,
     confirm: bool = False,
+    include_chain: bool = True,
+    limit: int = 2000,
+    offset: int = 0,
     chroma: Optional[ChromaStore] = None,
 ) -> dict[str, Any]:
     if not user_id or not str(user_id).strip():
@@ -63,7 +72,9 @@ def forget_memories(
                 fix="Use the same user_id and tenant_id that own the memory.",
                 retry_safe=False,
             )
-        deleted = store.delete_memories(user_id=user_id, tenant_id=tenant_id, memory_id=memory_id)
+        roots = [row]
+        total = 1
+        page, start = 1, 0
     else:
         has_filter = bool(memory_type or layer or session_id or query or match_all)
         if not has_filter:
@@ -75,7 +86,8 @@ def forget_memories(
                     "To delete every memory in this user scope, pass match_all=true and confirm=true."
                 ),
             )
-        matches = store.find_memories_for_forget(
+        page, start = _page_bounds(limit, offset)
+        total = store.count_memories_for_forget(
             user_id=user_id,
             tenant_id=tenant_id,
             memory_type=memory_type,
@@ -84,27 +96,49 @@ def forget_memories(
             query=query,
             match_all=match_all,
         )
+        roots = store.find_memories_for_forget(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            memory_type=memory_type,
+            layer=layer,
+            session_id=session_id,
+            query=query,
+            match_all=match_all,
+            limit=page,
+            offset=start,
+        )
+        remaining_preview = max(0, total - start - len(roots))
         if not confirm:
             return {
                 "status": "error",
                 "error_code": "CONFIRMATION_REQUIRED",
-                "message": f"Filter matches {len(matches)} memories. Nothing was deleted.",
-                "how_to_fix": "Re-call forget_memory with confirm=true to delete those rows.",
+                "message": (f"Filter matches {total} memories. This page has {len(roots)}. Nothing was deleted."),
+                "how_to_fix": "Re-call forget_memory with confirm=true. Pass offset=next_offset to continue.",
                 "retry_safe": True,
-                "matched_count": len(matches),
-                "matched_ids": [row["id"] for row in matches],
+                "matched_count": len(roots),
+                "matched_ids": [row["id"] for row in roots],
+                "total": total,
+                "offset": start,
+                "limit": page,
+                "remaining": remaining_preview,
+                "next_offset": (start + len(roots)) if remaining_preview else None,
+                "include_chain": include_chain,
             }
-        deleted = store.delete_memories(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            memory_type=memory_type,
-            layer=layer,
-            session_id=session_id,
-            query=query,
-            match_all=match_all,
-        )
+
+    doomed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for root in roots:
+        rows = store.supersede_chain(root["id"], user_id=user_id, tenant_id=tenant_id) if include_chain else [root]
+        for row in rows:
+            if row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            doomed.append(row)
+    deleted = store.delete_ids([row["id"] for row in doomed], user_id=user_id, tenant_id=tenant_id)
 
     ids = [row["id"] for row in deleted]
+    store.redact_audit_for_targets(ids)
+    remaining = 0 if memory_id else max(0, total - start - len(roots))
     index_removed = False
     if chroma is not None and ids:
         try:
@@ -128,6 +162,12 @@ def forget_memories(
             "index_removed": index_removed,
             "user_id": user_id,
             "tenant_id": tenant_id,
+            "include_chain": include_chain,
+            "total": total if not memory_id else len(ids),
+            "offset": 0 if memory_id else start,
+            "limit": len(ids) if memory_id else page,
+            "remaining": remaining,
+            "next_offset": None if memory_id or not remaining else start + len(roots),
         },
         message=f"Forgot {len(ids)} memories.",
     )

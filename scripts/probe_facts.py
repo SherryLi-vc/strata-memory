@@ -46,3 +46,11 @@ QUERIES: list[tuple[str, str]] = [
     ("Deploy procedure uv sync worker", "uv sync"),
     ("dog named Mochi morning walks", "Mochi"),
 ]
+
+# No distinctive tokens from the claims. Hashing and FTS should not be expected to hit these.
+PARAPHRASES: list[tuple[str, str]] = [
+    ("Where does the HTTP entrypoint bind", "port 8017"),
+    ("What colour scheme does the editor use", "Monokai Pro"),
+    ("How do we release an update", "uv sync"),
+    ("What is the pet called", "Mochi"),
+]

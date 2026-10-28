@@ -47,6 +47,7 @@ from .config import (
     save_config,
     truth_db_path,
 )
+from .embedder_stamp import expected_backend, log_effective_embedding
 from .embedding import EmbeddingProvider
 from .governance import ToolError, error_payload
 from .ops import (
@@ -472,6 +473,13 @@ async def handle_list_tools() -> list[Tool]:
                         "default": False,
                         "description": "过滤删除的确认门。按 id 删除不需要。",
                     },
+                    "include_chain": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "true=连 supersede 版本链一起删除。false=只删命中的行。",
+                    },
+                    "limit": {"type": "integer", "default": 2000, "minimum": 1, "maximum": 2000},
+                    "offset": {"type": "integer", "default": 0, "minimum": 0},
                 },
                 "required": ["user_id"],
             },
@@ -490,7 +498,8 @@ async def handle_list_tools() -> list[Tool]:
                     "tenant_id": {"type": "string"},
                     "session_id": {"type": "string"},
                     "include_archived": {"type": "boolean", "default": False},
-                    "limit": {"type": "integer", "default": 500, "minimum": 1, "maximum": 10000},
+                    "limit": {"type": "integer", "default": 500, "minimum": 1, "maximum": 2000},
+                    "offset": {"type": "integer", "default": 0, "minimum": 0},
                 },
                 "required": ["user_id"],
             },
@@ -803,6 +812,13 @@ async def _handle_init(args: dict) -> dict:
     # Eager create SoT
     TruthStore(truth_db_path(palace))
     _reset_state()
+    log_effective_embedding(
+        provider,
+        model,
+        embedding.dimension,
+        expected_backend(provider, model),
+        base_url,
+    )
 
     return {
         "status": "ok",
@@ -811,6 +827,9 @@ async def _handle_init(args: dict) -> dict:
         "palace": palace_path,
         "truth_db": str(truth_db_path(palace)),
         "embedding": f"{provider}/{model}",
+        "embedding_provider": provider,
+        "embedding_model": model,
+        "embedding_backend": expected_backend(provider, model),
         "embedding_base_url": base_url,
         "embedding_dimension": embedding.dimension,
         "cbt": cbt_default,
@@ -979,6 +998,9 @@ def _handle_forget(args: dict) -> dict:
             query=str(args.get("query") or ""),
             match_all=bool(args.get("match_all", False)),
             confirm=bool(args.get("confirm", False)),
+            include_chain=bool(args["include_chain"]) if "include_chain" in args else True,
+            limit=int(args.get("limit") or 2000),
+            offset=int(args.get("offset") or 0),
         )
     except ToolError as exc:
         return exc.to_dict()
@@ -1002,6 +1024,7 @@ def _handle_export(args: dict) -> dict:
             session_id=str(args.get("session_id") or ""),
             include_archived=bool(args.get("include_archived", False)),
             limit=int(args.get("limit") or 500),
+            offset=int(args.get("offset") or 0),
         )
     except ToolError as exc:
         return exc.to_dict()

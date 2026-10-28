@@ -58,6 +58,7 @@ def export_memories(
     session_id: str = "",
     include_archived: bool = False,
     limit: int = 500,
+    offset: int = 0,
 ) -> dict[str, Any]:
     if not user_id or not str(user_id).strip():
         raise ToolError(
@@ -67,14 +68,18 @@ def export_memories(
         )
     user_id = str(user_id).strip()
     tenant_id = tenant_id or ""
-    rows = store.list_for_export(
-        user_id=user_id,
-        tenant_id=tenant_id,
-        session_id=(session_id or "").strip(),
-        include_archived=include_archived,
-        limit=limit,
-    )
+    page = max(1, min(int(limit or 500), 2000))
+    start = max(0, int(offset or 0))
+    scope = {
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "session_id": (session_id or "").strip(),
+        "include_archived": include_archived,
+    }
+    total = store.count_for_export(**scope)
+    rows = store.list_for_export(**scope, limit=page, offset=start)
     memories = [{key: _cell(row, key) for key in _COLUMNS} for row in rows]
+    remaining = max(0, total - start - len(memories))
     store.audit(
         "export_memories",
         tenant_id=tenant_id,
@@ -94,7 +99,12 @@ def export_memories(
                 "include_archived": include_archived,
             },
             "count": len(memories),
+            "total": total,
+            "offset": start,
+            "limit": page,
+            "remaining": remaining,
+            "next_offset": (start + len(memories)) if remaining else None,
             "memories": memories,
         },
-        message=f"Exported {len(memories)} memories.",
+        message=f"Exported {len(memories)} of {total} memories.",
     )

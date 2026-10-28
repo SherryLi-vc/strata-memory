@@ -20,6 +20,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
+from .embedder_stamp import expected_backend, log_effective_embedding
+
 # Built-in defaults. Local (offline, no API key) is the default.
 # SiliconFlow remains available by setting STRATA_EMBEDDING_PROVIDER=siliconflow.
 # A saved config.json that already names a provider is left as-is.
@@ -74,12 +76,18 @@ CATEGORY_DECAY_RATES: dict[str, float] = {
 
 
 class EmbeddingConfig(BaseModel):
-    provider: str = DEFAULT_EMBEDDING_PROVIDER
-    model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    """Blank model, base URL, and dimension mean "use that provider's defaults".
+
+    A saved config that only sets ``provider`` must not inherit another
+    provider's model name. ``dimension`` 0 means unset.
+    """
+
+    provider: str = ""
+    model: str = ""
     api_key: str = Field(default="", exclude=True)
     base_url: str = ""
-    dimension: int = 384
-    mode: str = "local"  # cloud | local
+    dimension: int = 0
+    mode: str = ""  # cloud | local; filled when settings are resolved
 
 
 class CBTConfig(BaseModel):
@@ -305,10 +313,10 @@ def resolve_embedding_settings(
         model = str(overrides["model"]).strip()
     elif _env_str("STRATA_EMBEDDING_MODEL"):
         model = _env_str("STRATA_EMBEDDING_MODEL")
-    elif switched:
+    elif switched or not (saved.model or "").strip():
         model = str(spec["model"])
     else:
-        model = saved.model or str(spec["model"])
+        model = saved.model
 
     if "base_url" in overrides:
         base_url = str(overrides["base_url"]).strip().rstrip("/")
@@ -316,19 +324,19 @@ def resolve_embedding_settings(
         base_url = _env_str("STRATA_EMBEDDING_BASE_URL").rstrip("/")
     elif provider == "local":
         base_url = ""
-    elif switched:
-        base_url = str(spec["base_url"])
+    elif switched or not (saved.base_url or "").strip():
+        base_url = str(spec["base_url"]).rstrip("/")
     else:
-        base_url = (saved.base_url or str(spec["base_url"])).rstrip("/")
+        base_url = saved.base_url.rstrip("/")
 
     if "dimension" in overrides:
         dimension = int(overrides["dimension"])
     elif _env_str("STRATA_EMBEDDING_DIMENSION"):
         dimension = int(_env_str("STRATA_EMBEDDING_DIMENSION"))
-    elif switched:
+    elif switched or not saved.dimension:
         dimension = int(spec["dimension"])
     else:
-        dimension = int(saved.dimension or spec["dimension"])
+        dimension = int(saved.dimension)
     if dimension < 1:
         raise ValueError("STRATA_EMBEDDING_DIMENSION must be a positive integer.")
 
@@ -357,12 +365,24 @@ def load_config(palace_path: Optional[str] = None) -> Config:
             raw["version"] = "2.0.0"
         if "storage_backend" not in raw:
             raw["storage_backend"] = "sqlite"
+        embedding_raw = raw.get("embedding")
+        # Palaces saved before the embedding block existed were SiliconFlow.
+        # Do not treat a missing block as the new local default.
+        if not isinstance(embedding_raw, dict) or not embedding_raw:
+            raw["embedding"] = {"provider": "siliconflow"}
         cfg = Config(**{k: v for k, v in raw.items() if k in Config.model_fields})
         cfg.palace_path = str(palace)
     else:
         cfg = Config(palace_path=str(palace))
     # Env overrides provider, model, base URL, dimension, and key when set.
     cfg.embedding = resolve_embedding_settings(cfg.embedding)
+    log_effective_embedding(
+        cfg.embedding.provider,
+        cfg.embedding.model,
+        cfg.embedding.dimension,
+        expected_backend(cfg.embedding.provider, cfg.embedding.model),
+        cfg.embedding.base_url,
+    )
     return cfg
 
 

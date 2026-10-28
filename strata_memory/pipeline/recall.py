@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..config import Config
+from ..embedder_stamp import identity_for, incompatibility, mismatch_fix, mismatch_message
 from ..embedding import EmbeddingProvider
 from ..governance import CBTMiddleware, ToolError, success_payload
 from ..pipeline.lexical import fts_or_query, lexical_scores, squash_lexical
@@ -102,7 +103,24 @@ async def recall_context(
 
         if embed_provider and chroma:
             try:
-                qvec = await embed_provider.embed(query)
+                vector_count = chroma.count()
+            except Exception:
+                vector_count = 0
+            if vector_count:
+                probe = await embed_provider.embed(query)
+                ident = identity_for(config.embedding, embed_provider)
+                problem = incompatibility(chroma.persist_dir, ident, vector_count=vector_count)
+                if problem:
+                    raise ToolError(
+                        problem,
+                        mismatch_message(problem, ident),
+                        fix=mismatch_fix(),
+                        retry_safe=True,
+                    )
+            else:
+                probe = None
+            try:
+                qvec = probe if probe is not None else await embed_provider.embed(query)
                 where: dict[str, Any] = {"user_id": user_id}
                 if tenant_id:
                     where = {"$and": [{"user_id": user_id}, {"tenant_id": tenant_id}]}
@@ -118,6 +136,8 @@ async def recall_context(
                         row = store.get_by_id(mid)
                         if row:
                             by_id[mid] = row
+            except ToolError:
+                raise
             except Exception:
                 vector_ids = []
 

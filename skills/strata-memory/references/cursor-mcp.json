@@ -3,10 +3,9 @@
     "strata-memory": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["strata-memory"],
+      "args": ["strata-memory-mcp"],
       "env": {
-        "STRATA_PALACE": "${userHome}/.strata/palace",
-        "STRATA_EMBEDDING_PROVIDER": "local"
+        "STRATA_PALACE": "${userHome}/.strata/palace"
       }
     }
   }

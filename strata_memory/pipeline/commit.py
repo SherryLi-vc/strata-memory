@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..config import Config
+from ..embedder_stamp import identity_for, incompatibility, mismatch_fix, mismatch_message, write_stamp
 from ..embedding import EmbeddingProvider
 from ..governance import CBTMiddleware, QualityKernel, ToolError, success_payload
 from ..storage.chroma import ChromaStore
@@ -174,10 +175,20 @@ async def commit_memory(
         pass
 
     indexed = False
+    index_error = ""
     if not force_scratch and embed_provider is not None and chroma is not None and not assessment.is_negative_schema:
         try:
             text = f"[{user_id}/{room}] {claim[:2000]}"
             vec = await embed_provider.embed(text)
+            ident = identity_for(config.embedding, embed_provider)
+            try:
+                vector_count = chroma.count()
+            except Exception:
+                vector_count = 0
+            problem = incompatibility(chroma.persist_dir, ident, vector_count=vector_count)
+            if problem:
+                index_error = problem
+                raise RuntimeError(f"{problem}: {mismatch_message(problem, ident)} {mismatch_fix()}")
             chroma.add(
                 documents=[text],
                 metadatas=[
@@ -203,6 +214,7 @@ async def commit_memory(
                 embeddings=[vec],
             )
             indexed = True
+            write_stamp(chroma.persist_dir, ident)
             # Drop superseded vector companion if present
             if supersedes_id:
                 try:
@@ -256,6 +268,7 @@ async def commit_memory(
             "entity": entity or None,
             "confidence": verdict.confidence,
             "indexed": indexed,
+            "index_error": index_error or None,
             "summary": row.get("summary") or claim[:240],
             "cbt_hint": assessment.reframed_hint or None,
             "provenance": prov,

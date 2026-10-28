@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Reproducible L0 recall benchmark.
 
-Loads 6 facts (factual_truth, user_preference, procedure_rule) and runs 4
-queries at limit=3. Prints JSON with top-1 accuracy, whether every result
-respects limit, and the score spread.
+The literal set reuses surface words from the six claims. A 4/4 on that set
+is lexical overlap, not paraphrase quality. The paraphrase set shares no
+distinctive tokens; the hashing backend is not expected to rank those.
 
     uv run python scripts/recall_benchmark.py
 
-No network and no API key. Embeddings are left unset so the run measures
-lexical ranking of L0 rows, which is the path the 2026-10-29 teardown failed.
+No API key. The semantic block runs only when fastembed is installed.
+Otherwise it is reported as not_run. This script does not download weights.
 """
 
 from __future__ import annotations
@@ -19,12 +19,72 @@ import sys
 import tempfile
 from pathlib import Path
 
-from probe_facts import FACTS, QUERIES
+from probe_facts import FACTS, PARAPHRASES, QUERIES
 
 from strata_memory.config import Config, ensure_palace, save_config, truth_db_path
 from strata_memory.pipeline.commit import commit_memory
 from strata_memory.pipeline.recall import recall_context
 from strata_memory.storage.truth_store import TruthStore
+
+
+def _score_query(recall: dict, marker: str) -> dict:
+    hits = recall.get("hits") or []
+    scores = [hit.get("score") for hit in hits]
+    summaries = [hit.get("summary") or "" for hit in hits]
+    return {
+        "marker": marker,
+        "top1_ok": bool(summaries) and marker in summaries[0],
+        "hit_count": len(hits),
+        "scores": scores,
+        "top_summary": summaries[0] if summaries else "",
+        "limit_ok": len(hits) <= 3,
+    }
+
+
+async def _ask(cfg, store, queries: list[tuple[str, str]]) -> dict:
+    rows = []
+    for query, marker in queries:
+        recall = await recall_context(
+            config=cfg,
+            store=store,
+            embed_provider=None,
+            chroma=None,
+            user_id="bench_user",
+            query=query,
+            limit=3,
+            include_l0=True,
+        )
+        row = _score_query(recall, marker)
+        row["query"] = query
+        rows.append(row)
+    top1 = sum(1 for row in rows if row["top1_ok"])
+    return {
+        "backend": "lexical-bm25 (no embedding model; hashing is not used)",
+        "condition": "See suite name. Literal queries share surface tokens with the claims.",
+        "top1_hits": top1,
+        "top1_of": len(queries),
+        "limit_honoured": all(row["limit_ok"] for row in rows),
+        "results": rows,
+    }
+
+
+def _semantic_status() -> dict:
+    try:
+        import fastembed  # noqa: F401
+    except ImportError:
+        return {
+            "status": "not_run",
+            "reason": (
+                "fastembed is not installed. The default install uses hashing, which matches tokens, not paraphrases."
+            ),
+        }
+    return {
+        "status": "not_run",
+        "reason": (
+            "fastembed is installed, but this script does not load it. "
+            "A first load downloads weights and is not an offline benchmark."
+        ),
+    }
 
 
 async def _run(palace: Path) -> dict:
@@ -51,49 +111,20 @@ async def _run(palace: Path) -> dict:
         if result.get("status") != "ok":
             raise SystemExit(f"commit failed: {result}")
 
-    rows = []
-    top1 = 0
-    limit_ok = True
-    for query, marker in QUERIES:
-        recall = await recall_context(
-            config=cfg,
-            store=store,
-            embed_provider=None,
-            chroma=None,
-            user_id="bench_user",
-            query=query,
-            limit=3,
-            include_l0=True,
-        )
-        hits = recall.get("hits") or []
-        scores = [hit.get("score") for hit in hits]
-        summaries = [hit.get("summary") or "" for hit in hits]
-        hit_ok = bool(summaries) and marker in summaries[0]
-        top1 += int(hit_ok)
-        if len(hits) > 3:
-            limit_ok = False
-        rows.append(
-            {
-                "query": query,
-                "marker": marker,
-                "top1_ok": hit_ok,
-                "hit_count": len(hits),
-                "scores": scores,
-                "top_summary": summaries[0] if summaries else "",
-            }
-        )
-    flat_scores = [score for row in rows for score in row["scores"] if isinstance(score, (int, float))]
+    literal = await _ask(cfg, store, QUERIES)
+    paraphrase = await _ask(cfg, store, PARAPHRASES)
+    literal["condition"] = "Queries reuse surface tokens from the claims. This is not paraphrase quality."
+    paraphrase["condition"] = (
+        "Queries do not reuse distinctive claim tokens. Hashing and this lexical ranker can miss them."
+    )
+    paraphrase["backend"] = literal["backend"]
     return {
         "facts": len(FACTS),
-        "queries": len(QUERIES),
         "limit": 3,
-        "top1_hits": top1,
-        "top1_of": len(QUERIES),
-        "limit_honoured": limit_ok,
-        "scores_all_one": bool(flat_scores) and all(score == 1.0 for score in flat_scores),
-        "score_min": min(flat_scores) if flat_scores else None,
-        "score_max": max(flat_scores) if flat_scores else None,
-        "results": rows,
+        "note": "Do not quote a single 4/4 without naming the suite and backend.",
+        "literal_overlap": literal,
+        "paraphrase": paraphrase,
+        "semantic": _semantic_status(),
     }
 
 

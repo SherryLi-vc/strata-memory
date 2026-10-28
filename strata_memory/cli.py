@@ -1,9 +1,9 @@
 """CLI for Strata Memory.
 
 Usage:
-    strata-memory                       # MCP server (uvx strata-memory)
-    strata-memory setup --host cursor
-    strata-memory export --user USER [--out FILE]
+    strata-memory-mcp                         # MCP server
+    strata-memory-mcp setup --host cursor
+    strata-memory-mcp export --user USER [--out FILE]
     python -m strata_memory.cli init
     python -m strata_memory.cli doctor
     python -m strata_memory.cli stats
@@ -149,7 +149,10 @@ def cmd_setup() -> None:
     host = _flag("--host", "cursor")
     allowed: tuple[HostName, ...] = ("cursor", "claude-code", "claude-desktop")
     if host not in allowed:
-        print("Usage: strata-memory setup --host cursor|claude-code|claude-desktop", file=sys.stderr)
+        print(
+            "Usage: strata-memory-mcp setup --host cursor|claude-code|claude-desktop",
+            file=sys.stderr,
+        )
         sys.exit(2)
     print(render_setup(cast(HostName, host)), end="")
 
@@ -161,7 +164,10 @@ def cmd_export() -> None:
 
     user_id = _flag("--user")
     if not user_id:
-        print("Usage: strata-memory export --user USER_ID [--out FILE] [--tenant ID] [--session ID]", file=sys.stderr)
+        print(
+            "Usage: strata-memory-mcp export --user USER_ID [--out FILE] [--tenant ID] [--session ID]",
+            file=sys.stderr,
+        )
         sys.exit(2)
     cfg = load_config()
     store = TruthStore(truth_db_path(Path(cfg.palace_path)))
@@ -186,9 +192,9 @@ def cmd_export() -> None:
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in {"help", "--help", "-h"}:
         print(
-            "Usage: strata-memory {setup|export|init|doctor|stats|digest|project|migrate|serve}\n"
-            "       strata-memory            # start the MCP server\n"
-            "       strata-memory-mcp        # start the MCP server"
+            "Usage: strata-memory-mcp {setup|export|init|doctor|stats|digest|project|migrate|serve}\n"
+            "       strata-memory-mcp        # start the MCP server\n"
+            "The PyPI name is strata-memory-mcp. Do not run uvx strata-memory."
         )
         sys.exit(0 if len(sys.argv) > 1 else 1)
     cmd = sys.argv[1]
@@ -205,7 +211,7 @@ def main() -> None:
     }
     if cmd not in handlers:
         print(f"Unknown command: {cmd}")
-        print("Usage: strata-memory {setup|export|init|doctor|stats|digest|project|migrate|serve}")
+        print("Usage: strata-memory-mcp {setup|export|init|doctor|stats|digest|project|migrate|serve}")
         sys.exit(1)
     handlers[cmd]()
 

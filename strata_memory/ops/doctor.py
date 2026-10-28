@@ -13,6 +13,7 @@ from ..config import (
     is_usable_api_key,
     resolve_embedding_settings,
 )
+from ..embedder_stamp import expected_backend, incompatibility, log_effective_embedding, read_stamp
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
 
@@ -67,6 +68,7 @@ def strata_doctor(
                 "model": embedding.model,
                 "base_url": embedding.base_url,
                 "dimension": embedding.dimension,
+                "backend": expected_backend(embedding.provider, embedding.model),
                 "key_required": requires_key,
                 "env_STRATA_API_KEY_set": bool(__import__("os").environ.get("STRATA_API_KEY")),
                 "env_SILICONFLOW_API_KEY_set": bool(__import__("os").environ.get("SILICONFLOW_API_KEY")),
@@ -74,6 +76,45 @@ def strata_doctor(
             },
         }
     )
+    backend = expected_backend(embedding.provider, embedding.model)
+    log_effective_embedding(
+        embedding.provider,
+        embedding.model,
+        embedding.dimension,
+        backend,
+        embedding.base_url,
+    )
+    if chroma is not None:
+        try:
+            stamped_count = chroma.count()
+        except Exception:
+            stamped_count = 0
+        ident = {
+            "provider": embedding.provider,
+            "model": embedding.model,
+            "dimension": embedding.dimension,
+            "backend": backend,
+        }
+        code = incompatibility(chroma.persist_dir, ident, vector_count=stamped_count)
+        stored = read_stamp(chroma.persist_dir)
+        checks.append(
+            {
+                "name": "embedder_stamp",
+                "ok": code is None,
+                "detail": {"stamp": stored, "effective": ident, "code": code},
+            }
+        )
+        if code:
+            issues.append(
+                {
+                    "severity": "error",
+                    "code": code,
+                    "message": (
+                        "Vector index embedder does not match the effective provider and model. "
+                        "Rebuild before recall or commit indexes more vectors."
+                    ),
+                }
+            )
     if requires_key and not is_usable_api_key(resolved):
         issues.append(
             {
@@ -228,6 +269,13 @@ def strata_doctor(
             "vector_count": vector_count,
             "by_layer": st.get("by_layer", {}) if st else {},
             "api_key": key_stat,
+            "embedding": {
+                "provider": embedding.provider,
+                "model": embedding.model,
+                "dimension": embedding.dimension,
+                "backend": expected_backend(embedding.provider, embedding.model),
+                "base_url": embedding.base_url,
+            },
         },
         "orphan_sample": orphan_sample,
         "missing_sample": missing_sample,

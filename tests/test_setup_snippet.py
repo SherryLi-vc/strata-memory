@@ -1,6 +1,8 @@
-"""Host snippets for uvx strata-memory stay offline and contain no secrets."""
+"""Host snippets for uvx strata-memory-mcp do not override a saved embedder."""
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -8,10 +10,12 @@ from strata_memory.ops.setup_host import render_setup
 
 
 @pytest.mark.parametrize("host", ["cursor", "claude-code", "claude-desktop"])
-def test_setup_snippet_is_local_uvx(host):
+def test_setup_snippet_is_json_and_does_not_pin_provider(host):
     text = render_setup(host)
-    assert "uvx" in text
-    assert "strata-memory" in text
-    assert '"STRATA_EMBEDDING_PROVIDER": "local"' in text
+    parsed = json.loads(text)
+    args = parsed["mcpServers"]["strata-memory"]["args"]
+    env = parsed["mcpServers"]["strata-memory"]["env"]
+    assert args == ["strata-memory-mcp"]
+    assert "STRATA_EMBEDDING_PROVIDER" not in env
     assert "sk-" not in text
-    assert "api.siliconflow.cn" not in text
+    assert text.strip().startswith("{")

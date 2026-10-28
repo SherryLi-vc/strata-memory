@@ -23,17 +23,23 @@
 需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。默认不需要 API key，正文留在本机。
 
 ```bash
-uvx strata-memory
+uvx strata-memory-mcp
 ```
 
-数据目录是 `STRATA_PALACE`（默认 `~/.strata/palace`）。嵌入提供方默认 `local`。
+PyPI 上的项目名是 `strata-memory-mcp`。`strata-memory` 是别人的包，不要安装那个名字。还没发布到 PyPI 时：
+
+```bash
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp
+```
+
+数据目录是 `STRATA_PALACE`（默认 `~/.strata/palace`）。新 palace 默认 `local`。已经写了提供方的 `config.json` 保持原样。配置片段不会设置 `STRATA_EMBEDDING_PROVIDER`。
 
 给宿主打印一段配置，合并进现有文件，不要整文件覆盖：
 
 ```bash
-uvx strata-memory setup --host cursor
-uvx strata-memory setup --host claude-code
-uvx strata-memory setup --host claude-desktop
+uvx strata-memory-mcp setup --host cursor
+uvx strata-memory-mcp setup --host claude-code
+uvx strata-memory-mcp setup --host claude-desktop
 ```
 
 然后调用一次 `strata_init`，再调用 `strata_doctor`。默认提供方下 `summary.api_key.usable` 为 true，因为不需要密钥。
@@ -73,7 +79,7 @@ uvx strata-memory setup --host claude-desktop
 导出 JSON：
 
 ```bash
-uvx strata-memory export --user user_001 --out memories.json
+uvx strata-memory-mcp export --user user_001 --out memories.json
 ```
 
 ## 默认嵌入
@@ -83,7 +89,7 @@ uvx strata-memory export --user user_001 --out memories.json
 语义模型：
 
 ```bash
-uvx --from 'strata-memory[local]' strata-memory
+uvx --from 'strata-memory-mcp[local]' strata-memory-mcp
 ```
 
 这会安装可选的 `local` extra。第一次可能下载 `sentence-transformers/all-MiniLM-L6-v2`，之后留在本机。换提供方、模型或维度后要重建索引。
