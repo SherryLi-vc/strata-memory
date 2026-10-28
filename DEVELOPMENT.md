@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/vincy/strata-memory.git
+git clone https://github.com/SherryLi-vc/strata-memory.git
 cd strata-memory
 uv sync --extra dev
 uv run pytest -v
@@ -14,7 +14,7 @@ uv run strata-memory-mcp
 
 ```
 strata_memory/
-├── server.py                 # MCP surface (10 tools)
+├── server.py                 # MCP surface (11 tools)
 ├── config.py                 # Config + palace paths + truth_db_path
 ├── governance/
 │   ├── quality_kernel.py     # Write-time validation / dedup hash / TTL
@@ -34,10 +34,11 @@ strata_memory/
 │   └── scoring.py            # psych score formula
 ├── ops/
 │   ├── doctor.py
+│   ├── hygiene.py
 │   ├── rebuild.py
 │   ├── stats.py
 │   └── projection.py
-├── embedding/                # BGE-M3 providers
+├── embedding/                # SiliconFlow, OpenAI-compatible, local in-process
 ├── safety/                   # legacy CBT helpers
 ├── audit/                    # Markdown audit wrapper
 └── tools/                    # legacy onboarding helpers

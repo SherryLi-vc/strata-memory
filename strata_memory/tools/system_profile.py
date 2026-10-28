@@ -11,23 +11,25 @@ the conversation. MCP stays silent — no print(), no prompts, just structured r
 
 from __future__ import annotations
 
-import json
 import os
 import platform
 from datetime import date
 from pathlib import Path
 from typing import Optional
 
-
 # ── Hardware profiling ──────────────────────────────────────────────────
+
 
 def _check_cuda() -> bool:
     """Best-effort CUDA detection without importing torch."""
     try:
         import subprocess
+
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
@@ -52,22 +54,24 @@ def get_system_profile() -> dict:
     # Try psutil for accurate RAM/CPU
     try:
         import psutil
-        profile["ram_gb"] = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+
+        profile["ram_gb"] = round(psutil.virtual_memory().total / (1024**3), 1)
         profile["cpu_cores"] = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or 0
     except ImportError:
         # Fallback: rough detection from /proc or sysctl
         try:
             import subprocess
+
             if platform.system() == "Darwin":
                 result = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
-                profile["ram_gb"] = round(int(result.stdout.strip()) / (1024 ** 3), 1)
+                profile["ram_gb"] = round(int(result.stdout.strip()) / (1024**3), 1)
                 result = subprocess.run(["sysctl", "-n", "hw.physicalcpu"], capture_output=True, text=True)
                 profile["cpu_cores"] = int(result.stdout.strip())
             elif platform.system() == "Linux":
                 with open("/proc/meminfo") as f:
                     for line in f:
                         if "MemTotal" in line:
-                            profile["ram_gb"] = round(int(line.split()[1]) / (1024 ** 2), 1)
+                            profile["ram_gb"] = round(int(line.split()[1]) / (1024**2), 1)
                             break
                 result = subprocess.run(["nproc"], capture_output=True, text=True)
                 profile["cpu_cores"] = int(result.stdout.strip())
@@ -94,60 +98,150 @@ _RECOMMENDATION_TABLE = {
     # (min_ram, accelerator): [(provider, model, reason, tier), ...]
     # tier: "local" | "cloud" | "hybrid"
     (32, "cuda"): [
-        {"provider": "local", "model": "nomic-embed-text-v2", "dimension": 768,
-         "tier": "local", "reason": "Best-in-class local embedding with GPU acceleration. ~2GB VRAM."},
-        {"provider": "local", "model": "BAAI/bge-m3-gguf", "dimension": 1024,
-         "tier": "local", "reason": "Multilingual BGE-M3 quantized for local use. Covers Chinese + English."},
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Cloud BGE-M3 via SiliconFlow API. Zero local footprint, MRL-truncated."},
+        {
+            "provider": "local",
+            "model": "nomic-embed-text-v2",
+            "dimension": 768,
+            "tier": "local",
+            "reason": "Best-in-class local embedding with GPU acceleration. ~2GB VRAM.",
+        },
+        {
+            "provider": "local",
+            "model": "BAAI/bge-m3-gguf",
+            "dimension": 1024,
+            "tier": "local",
+            "reason": "Multilingual BGE-M3 quantized for local use. Covers Chinese + English.",
+        },
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Cloud BGE-M3 via SiliconFlow API. Zero local footprint, MRL-truncated.",
+        },
     ],
     (32, "mps"): [
-        {"provider": "local", "model": "nomic-embed-text-v2", "dimension": 768,
-         "tier": "local", "reason": "Excellent local embedding on Apple Silicon via MPS. ~2GB memory."},
-        {"provider": "local", "model": "BAAI/bge-m3-gguf", "dimension": 1024,
-         "tier": "local", "reason": "Multilingual BGE-M3 quantized. Runs well on M-series with MPS."},
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Cloud API — ideal if you want zero local ML dependencies."},
+        {
+            "provider": "local",
+            "model": "nomic-embed-text-v2",
+            "dimension": 768,
+            "tier": "local",
+            "reason": "Excellent local embedding on Apple Silicon via MPS. ~2GB memory.",
+        },
+        {
+            "provider": "local",
+            "model": "BAAI/bge-m3-gguf",
+            "dimension": 1024,
+            "tier": "local",
+            "reason": "Multilingual BGE-M3 quantized. Runs well on M-series with MPS.",
+        },
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Cloud API — ideal if you want zero local ML dependencies.",
+        },
     ],
     (32, "cpu"): [
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "No GPU detected. Cloud API avoids slow CPU inference (BGE-M3 is 560M params)."},
-        {"provider": "local", "model": "all-MiniLM-L6-v2", "dimension": 384,
-         "tier": "local", "reason": "Lightweight (~80MB). Runs on CPU. English-only but very fast."},
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "No GPU detected. Cloud API avoids slow CPU inference (BGE-M3 is 560M params).",
+        },
+        {
+            "provider": "local",
+            "model": "all-MiniLM-L6-v2",
+            "dimension": 384,
+            "tier": "local",
+            "reason": "Lightweight (~80MB). Runs on CPU. English-only but very fast.",
+        },
     ],
     (16, "cuda"): [
-        {"provider": "local", "model": "nomic-embed-text-v2", "dimension": 768,
-         "tier": "local", "reason": "GPU-accelerated local embedding — good balance of speed and quality."},
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Cloud API with Chinese+English support. No local GPU memory pressure."},
+        {
+            "provider": "local",
+            "model": "nomic-embed-text-v2",
+            "dimension": 768,
+            "tier": "local",
+            "reason": "GPU-accelerated local embedding — good balance of speed and quality.",
+        },
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Cloud API with Chinese+English support. No local GPU memory pressure.",
+        },
     ],
     (16, "mps"): [
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Recommended: 16GB shared memory is tight. Cloud API keeps it light."},
-        {"provider": "local", "model": "all-MiniLM-L6-v2", "dimension": 384,
-         "tier": "local", "reason": "Ultra-light local fallback. Runs comfortably on 16GB shared memory."},
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Recommended: 16GB shared memory is tight. Cloud API keeps it light.",
+        },
+        {
+            "provider": "local",
+            "model": "all-MiniLM-L6-v2",
+            "dimension": 384,
+            "tier": "local",
+            "reason": "Ultra-light local fallback. Runs comfortably on 16GB shared memory.",
+        },
     ],
     (16, "cpu"): [
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Best option for CPU-only 16GB: cloud API, no local model overhead."},
-        {"provider": "local", "model": "all-MiniLM-L6-v2", "dimension": 384,
-         "tier": "local", "reason": "If privacy matters more than multilingual quality. English-only, ~80MB."},
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Best option for CPU-only 16GB: cloud API, no local model overhead.",
+        },
+        {
+            "provider": "local",
+            "model": "all-MiniLM-L6-v2",
+            "dimension": 384,
+            "tier": "local",
+            "reason": "If privacy matters more than multilingual quality. English-only, ~80MB.",
+        },
     ],
     (8, "cuda"): [
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Limited RAM. Cloud API recommended to avoid memory pressure."},
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Limited RAM. Cloud API recommended to avoid memory pressure.",
+        },
     ],
     (8, "mps"): [
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "8GB shared memory is tight. Cloud API is the safe choice."},
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "8GB shared memory is tight. Cloud API is the safe choice.",
+        },
     ],
     (8, "cpu"): [
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Cloud API — the only practical option for 8GB CPU-only machines."},
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Cloud API — the only practical option for 8GB CPU-only machines.",
+        },
     ],
     (0, "cpu"): [
-        {"provider": "siliconflow", "model": "BAAI/bge-m3", "dimension": 384,
-         "tier": "cloud", "reason": "Default recommendation: SiliconFlow BGE-M3 cloud API. Works everywhere."},
+        {
+            "provider": "siliconflow",
+            "model": "BAAI/bge-m3",
+            "dimension": 384,
+            "tier": "cloud",
+            "reason": "Default recommendation: SiliconFlow BGE-M3 cloud API. Works everywhere.",
+        },
     ],
 }
 
@@ -200,6 +294,7 @@ def search_embedding_recommendations(profile: Optional[dict] = None) -> list[dic
 
 # ── Memory config application ───────────────────────────────────────────
 
+
 def apply_memory_config(
     config_dict: dict,
     *,
@@ -223,7 +318,7 @@ def apply_memory_config(
 
     Returns a status dict with paths and initialization results.
     """
-    from ..config import Config, ensure_palace, save_config, palace_dirs
+    from ..config import Config, ensure_palace, palace_dirs, save_config
 
     mode = config_dict.get("mode", "personal")
     provider = config_dict.get("provider", "siliconflow")
@@ -243,16 +338,24 @@ def apply_memory_config(
         mode=mode,
         tenant_id=tenant_id,
         embedding={
-            "provider": provider, "model": model,
-            "api_key": api_key, "base_url": base_url, "dimension": dimension,
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "dimension": dimension,
         },
         cbt={
             "enabled": mode == "personal",
-            "mode": cbt_mode, "cooling_hours": 48,
+            "mode": cbt_mode,
+            "cooling_hours": 48,
             "detect_distortions": mode == "personal",
         },
-        audit={"enabled": mode == "company", "log_to_markdown": True,
-               "log_to_db": mode == "company", "retention_days": 365},
+        audit={
+            "enabled": mode == "company",
+            "log_to_markdown": True,
+            "log_to_db": mode == "company",
+            "retention_days": 365,
+        },
     )
 
     env_path = os.environ.get("STRATA_PALACE", "")
@@ -266,6 +369,7 @@ def apply_memory_config(
     # Reset global state so next call picks up the new config (hot reload)
     if config_module:
         from .. import server
+
         server._reset_state()
 
     # Initialize ChromaDB and SQLite eagerly

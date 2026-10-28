@@ -1,18 +1,20 @@
-"""Strata Memory MCP Server v2.0.0 — Industrial AI Memory Base.
+"""Strata Memory MCP Server v2.1.0 — Industrial AI Memory Base.
 
 Core philosophy: LLM decides; deterministic code executes.
 
-Tool surface (intent-aggregated, < 15):
+Tool surface (11, intent-aggregated):
   Setup:   strata_init
   Write:   commit_memory, promote_session
   Read:    recall_context, expand_memory_detail
-  Ops:     strata_doctor, strata_rebuild_index, strata_stats, strata_project
+  Ops:     strata_doctor, strata_rebuild_index, strata_stats, strata_project,
+           strata_digest, strata_hygiene
 
 All descriptions follow: 作用 + 触发 + 禁忌 (three-part defensive contract).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -35,11 +37,12 @@ from .audit import AuditLogger
 from .config import (
     Config,
     api_key_status,
+    embedding_requires_api_key,
     ensure_palace,
     is_initialized,
     is_usable_api_key,
     load_config,
-    resolve_api_key,
+    resolve_embedding_settings,
     save_config,
     truth_db_path,
 )
@@ -63,51 +66,67 @@ from .storage.truth_store import TruthStore
 # ── Global state ────────────────────────────────────────────────────────
 _config: Optional[Config] = None
 _embed_provider: Optional[EmbeddingProvider] = None
+_embed_sig: Optional[tuple] = None
 _chroma: Optional[ChromaStore] = None
 _store: Optional[TruthStore] = None
 _auditor: Optional[AuditLogger] = None
+
 
 # Three-part description helper
 def _d(action: str, trigger: str, forbid: str) -> str:
     return f"作用：{action}\n触发：{trigger}\n禁忌：{forbid}"
 
 
+def _embed_signature(cfg: Config) -> tuple:
+    key = cfg.embedding.api_key or ""
+    digest = hashlib.sha256(key.encode()).hexdigest()[:12] if key else ""
+    emb = cfg.embedding
+    return (emb.provider, emb.model, emb.base_url, emb.dimension, digest)
+
+
 def _ensure_embed_provider(config: Config) -> Optional[EmbeddingProvider]:
     """Create embedding provider or raise ToolError with how_to_fix.
 
-    Never silently leave provider as None for cloud providers that need a key.
-    Re-reads env on every call so Hermes can hot-fix STRATA_API_KEY without
-    full process restart *after* _reset_state / next tool call post-fix.
+    Re-reads provider, model, base URL, dimension, and key from the environment
+    on every call so a host can change STRATA_EMBEDDING_* without a full restart
+    after the next tool call.
     """
-    global _embed_provider
-    if _embed_provider is not None:
+    global _embed_provider, _embed_sig
+    config.embedding = resolve_embedding_settings(config.embedding)
+    signature = _embed_signature(config)
+    if _embed_provider is not None and _embed_sig == signature:
         return _embed_provider
+    _embed_provider = None
+    _embed_sig = None
 
     cfg = config.embedding
-    # Always re-resolve from env — config.json never holds full key
-    key = resolve_api_key(cfg.api_key or "")
-    cfg.api_key = key
+    key = cfg.api_key or ""
     status = api_key_status(key)
-    provider = (cfg.provider or "siliconflow").lower()
-
-    needs_key = provider in {"siliconflow", "openai", "openai_compatible", "cloud"}
+    provider = cfg.provider
+    needs_key = embedding_requires_api_key(provider, cfg.base_url)
     if needs_key and not is_usable_api_key(key):
         raise ToolError(
             "EMBEDDING_API_KEY_MISSING",
             (
                 f"Embedding provider '{provider}' has no usable API key "
-                f"(status={status.get('reason')}, length={status.get('length', 0)})."
+                f"(status={status.get('reason')}, length={status.get('length', 0)}, "
+                f"base_url={cfg.base_url})."
             ),
             fix=(
-                "Set a full key in the MCP process environment, then restart Hermes MCP:\n"
-                "  export STRATA_API_KEY='sk-...'   # full key, NOT sk-xxx...yyy redacted form\n"
-                "Or put STRATA_API_KEY into ~/.hermes/.env and use the updated strata-wrapper.sh.\n"
-                "Do NOT read OpenClaw memorySearch.remote.apiKey if it contains '...' "
-                "(that is a UI-redacted placeholder).\n"
-                "Verify: strata_doctor → embedding.api_key.usable must be true."
+                "Set a full key in the MCP process environment (not in chat):\n"
+                "  STRATA_EMBEDDING_API_KEY or STRATA_API_KEY\n"
+                "SiliconFlow also reads SILICONFLOW_API_KEY. "
+                "OpenAI and other compatible endpoints also read OPENAI_API_KEY.\n"
+                "Reject keys containing '...'.\n"
+                "For an in-process model: STRATA_EMBEDDING_PROVIDER=local "
+                "and uv sync --extra local.\n"
+                "For a local server: STRATA_EMBEDDING_PROVIDER=openai_compatible "
+                "and STRATA_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1 "
+                "(loopback does not require a key).\n"
+                "Verify: strata_doctor → summary.api_key.usable must be true."
             ),
             retry_safe=True,
-            fields={"api_key_status": status, "provider": provider},
+            fields={"api_key_status": status, "provider": provider, "base_url": cfg.base_url},
         )
 
     try:
@@ -118,14 +137,17 @@ def _ensure_embed_provider(config: Config) -> Optional[EmbeddingProvider]:
             api_key=key,
             dimension=cfg.dimension,
         )
+        _embed_sig = signature
     except Exception as e:
         raise ToolError(
             "EMBEDDING_PROVIDER_INIT_FAILED",
             f"Failed to create embedding provider '{provider}': {e}",
             fix=(
-                "Check provider/model/base_url in config. "
-                "For siliconflow: provider=siliconflow, model=BAAI/bge-m3, "
-                "base_url=https://api.siliconflow.cn/v1, and a valid STRATA_API_KEY."
+                "Check STRATA_EMBEDDING_PROVIDER, STRATA_EMBEDDING_BASE_URL, "
+                "STRATA_EMBEDDING_MODEL, and STRATA_EMBEDDING_DIMENSION. "
+                "siliconflow: model BAAI/bge-m3, base_url https://api.siliconflow.cn/v1. "
+                "openai_compatible: any POST /embeddings server. "
+                "local: uv sync --extra local."
             ),
             retry_safe=True,
             fields={"provider": provider, "error": str(e)},
@@ -141,26 +163,21 @@ def _get_state(
     if _config is None:
         _config = load_config()
     else:
-        # Refresh key from env each time (Hermes may inject env after boot)
-        refreshed = resolve_api_key(_config.embedding.api_key or "")
-        if refreshed and refreshed != _config.embedding.api_key:
-            _config.embedding.api_key = refreshed
-            _embed_provider = None  # force recreate with new key
+        # Refresh provider, endpoint, and key from env (Hermes may inject env after boot).
+        _config.embedding = resolve_embedding_settings(_config.embedding)
 
     palace = Path(_config.palace_path)
     if _store is None:
         ensure_palace(palace)
         _store = TruthStore(truth_db_path(palace))
 
-    embed: Optional[EmbeddingProvider] = _embed_provider
-    if require_embed or _embed_provider is None:
-        try:
-            embed = _ensure_embed_provider(_config)
-        except ToolError:
-            if require_embed:
-                raise
-            # Non-vector tools (doctor/stats/commit without index) may proceed
-            embed = None
+    try:
+        embed = _ensure_embed_provider(_config)
+    except ToolError:
+        if require_embed:
+            raise
+        # Non-vector tools (doctor/stats/commit without index) may proceed
+        embed = None
 
     if _chroma is None:
         _chroma = ChromaStore(palace / "l2_vector")
@@ -170,9 +187,10 @@ def _get_state(
 
 
 def _reset_state() -> None:
-    global _config, _embed_provider, _chroma, _store, _auditor
+    global _config, _embed_provider, _embed_sig, _chroma, _store, _auditor
     _config = None
     _embed_provider = None
+    _embed_sig = None
     _chroma = None
     _store = None
     _auditor = None
@@ -185,12 +203,14 @@ def _json(data: Any) -> list[TextContent]:
 def _tool_error(e: Exception) -> list[TextContent]:
     if isinstance(e, ToolError):
         return _json(e.to_dict())
-    return _json(error_payload(
-        "INTERNAL_ERROR",
-        str(e),
-        fix="Inspect strata_doctor. If index-related, try strata_rebuild_index(confirm=true).",
-        retry_safe=True,
-    ))
+    return _json(
+        error_payload(
+            "INTERNAL_ERROR",
+            str(e),
+            fix="Inspect strata_doctor. If index-related, try strata_rebuild_index(confirm=true).",
+            retry_safe=True,
+        )
+    )
 
 
 # ── Server ──────────────────────────────────────────────────────────────
@@ -218,13 +238,36 @@ async def handle_list_tools() -> list[Tool]:
                     },
                     "api_key": {
                         "type": "string",
-                        "description": "Embedding API key。优先使用环境变量 STRATA_API_KEY，可省略此字段。",
+                        "description": (
+                            "Embedding API key。优先 STRATA_EMBEDDING_API_KEY / STRATA_API_KEY，"
+                            "可省略。不要把密钥写进对话。"
+                        ),
                     },
-                    "provider": {"type": "string", "default": "siliconflow"},
-                    "model": {"type": "string", "default": "BAAI/bge-m3"},
+                    "provider": {
+                        "type": "string",
+                        "description": (
+                            "siliconflow（默认）| openai | openai_compatible | local。"
+                            "省略时用 STRATA_EMBEDDING_PROVIDER。"
+                        ),
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "模型 id。省略时用 STRATA_EMBEDDING_MODEL 或该 provider 的默认模型。",
+                    },
                     "base_url": {
                         "type": "string",
-                        "default": "https://api.siliconflow.cn/v1",
+                        "description": (
+                            "OpenAI 兼容 embeddings 根地址。省略时用 STRATA_EMBEDDING_BASE_URL。"
+                            "SiliconFlow 默认 https://api.siliconflow.cn/v1。"
+                            "本机回环地址不要求 API key。"
+                        ),
+                    },
+                    "dimension": {
+                        "type": "integer",
+                        "description": (
+                            "入库向量维度。省略时用 STRATA_EMBEDDING_DIMENSION。"
+                            "SiliconFlow bge-m3 默认 384（截断）。换模型后需 rebuild。"
+                        ),
                     },
                     "cbt_mode": {
                         "type": "string",
@@ -329,8 +372,7 @@ async def handle_list_tools() -> list[Tool]:
             description=_d(
                 "渐进式召回：Hybrid RRF（向量+FTS）返回 {id, summary, score} 卡片，控制 Token。",
                 "新会话开始、需要相关记忆时；默认 deep=L0+检索，shallow=仅核心画像。",
-                "禁止把返回结果当作全文；需要细节时必须再调 expand_memory_detail。"
-                "禁止无 query 的全库倾倒。",
+                "禁止把返回结果当作全文；需要细节时必须再调 expand_memory_detail。禁止无 query 的全库倾倒。",
             ),
             inputSchema={
                 "type": "object",
@@ -396,8 +438,7 @@ async def handle_list_tools() -> list[Tool]:
             description=_d(
                 "清空并从 SQLite 全量重建向量索引（重建级容灾）。",
                 "doctor 报告 INDEX_EMPTY/ORPHANS，或 embedding 模型/维度变更后。",
-                "必须 confirm=true。仅摧毁向量伴生层，绝不删除 SQLite 真相源。"
-                "禁止在无 API Key 时强行 rebuild。",
+                "必须 confirm=true。仅摧毁向量伴生层，绝不删除 SQLite 真相源。禁止在无 API Key 时强行 rebuild。",
             ),
             inputSchema={
                 "type": "object",
@@ -594,14 +635,36 @@ async def handle_read_resource(uri: str) -> str:
 
 # ── Handlers ────────────────────────────────────────────────────────────
 
+
 async def _handle_init(args: dict) -> dict:
     mode = args.get("mode", "personal")
-    provider = args.get("provider", "siliconflow")
-    model = args.get("model", "BAAI/bge-m3")
-    base_url = args.get("base_url", "https://api.siliconflow.cn/v1")
     tenant_id = args.get("tenant_id", "")
-    api_key = resolve_api_key(str(args.get("api_key") or ""))
+    try:
+        embedding = resolve_embedding_settings(
+            overrides={
+                "provider": args.get("provider"),
+                "model": args.get("model"),
+                "base_url": args.get("base_url"),
+                "dimension": args.get("dimension"),
+                "api_key": args.get("api_key"),
+            }
+        )
+    except (ValueError, TypeError) as exc:
+        return error_payload(
+            "EMBEDDING_CONFIG_INVALID",
+            str(exc),
+            fix=(
+                "Set STRATA_EMBEDDING_PROVIDER to siliconflow, openai, "
+                "openai_compatible, or local. "
+                "STRATA_EMBEDDING_DIMENSION must be a positive integer."
+            ),
+        )
+    provider = embedding.provider
+    model = embedding.model
+    base_url = embedding.base_url
+    api_key = embedding.api_key
     key_stat = api_key_status(api_key)
+    needs_key = embedding_requires_api_key(provider, base_url)
 
     if mode == "company" and not tenant_id:
         return error_payload(
@@ -610,19 +673,23 @@ async def _handle_init(args: dict) -> dict:
             fix="Pass tenant_id='your_org_id' or use mode='personal'.",
         )
 
-    if (provider or "siliconflow") == "siliconflow" and not is_usable_api_key(api_key):
+    if needs_key and not is_usable_api_key(api_key):
         return error_payload(
             "EMBEDDING_API_KEY_MISSING",
             (
-                "strata_init: no usable SiliconFlow API key "
-                f"(status={key_stat.get('reason')}, length={key_stat.get('length', 0)})."
+                f"strata_init: no usable API key for {provider} "
+                f"(status={key_stat.get('reason')}, length={key_stat.get('length', 0)}, "
+                f"base_url={base_url})."
             ),
             fix=(
-                "Pass a full api_key= OR export STRATA_API_KEY before starting Hermes. "
-                "Reject keys containing '...' (OpenClaw redaction). "
-                "Recommended: put STRATA_API_KEY in ~/.hermes/.env and use updated strata-wrapper.sh."
+                "Set STRATA_EMBEDDING_API_KEY or STRATA_API_KEY in the environment "
+                "(not in chat). SiliconFlow also reads SILICONFLOW_API_KEY; "
+                "OpenAI-compatible endpoints also read OPENAI_API_KEY. "
+                "Reject keys containing '...'. "
+                "local needs no key (uv sync --extra local). "
+                "A loopback STRATA_EMBEDDING_BASE_URL needs no key."
             ),
-            fields={"api_key_status": key_stat},
+            fields={"api_key_status": key_stat, "provider": provider, "base_url": base_url},
         )
 
     cbt_default = args.get("cbt_mode") or ("off" if mode == "company" else "passive")
@@ -638,7 +705,8 @@ async def _handle_init(args: dict) -> dict:
             "model": model,
             "api_key": api_key,
             "base_url": base_url,
-            "dimension": 384,
+            "dimension": embedding.dimension,
+            "mode": embedding.mode,
         },
         cbt={
             "enabled": mode == "personal" and cbt_default != "off",
@@ -668,12 +736,15 @@ async def _handle_init(args: dict) -> dict:
         "palace": palace_path,
         "truth_db": str(truth_db_path(palace)),
         "embedding": f"{provider}/{model}",
+        "embedding_base_url": base_url,
+        "embedding_dimension": embedding.dimension,
         "cbt": cbt_default,
         "tenant_id": tenant_id or None,
         "api_key_configured": is_usable_api_key(api_key),
+        "api_key_required": needs_key,
         "api_key_status": key_stat,
         "next": [
-            "strata_doctor() — confirm embedding.api_key.usable=true",
+            "strata_doctor() — confirm summary.api_key.usable=true",
             "commit_memory(...) to write facts",
             "recall_context(...) at session start",
         ],
@@ -730,9 +801,8 @@ async def _handle_commit(args: dict) -> dict:
         result["vector_index_warning"] = embed_warning
         result["indexed"] = False
         result["message"] = (
-            (result.get("message") or "ok")
-            + " | Vector index skipped: fix STRATA_API_KEY then strata_rebuild_index(confirm=true)."
-        )
+            result.get("message") or "ok"
+        ) + " | Vector index skipped: fix STRATA_API_KEY then strata_rebuild_index(confirm=true)."
     return result
 
 
@@ -901,7 +971,10 @@ def _onboarding_md() -> str:
 
 ## First-time setup
 
-1. Prefer env: `STRATA_API_KEY`, optional `STRATA_PALACE`
+1. Prefer env: `STRATA_API_KEY` or `STRATA_EMBEDDING_API_KEY`, optional `STRATA_PALACE`.
+   Provider defaults to SiliconFlow. Override with `STRATA_EMBEDDING_PROVIDER`,
+   `STRATA_EMBEDDING_BASE_URL`, `STRATA_EMBEDDING_MODEL`, and `STRATA_EMBEDDING_DIMENSION`.
+   `local` stays on-device. Any other endpoint receives memory text.
 2. Call `strata_init(mode="personal")` or company with `tenant_id`
 3. `strata_doctor()` — expect healthy / address warnings
 4. Write: `commit_memory(user_id, memory_type, fact_claim, confidence_score)`

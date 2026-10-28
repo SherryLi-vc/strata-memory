@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..config import Config
 from ..embedding import EmbeddingProvider
@@ -66,31 +65,33 @@ async def strata_rebuild_index(
             continue  # keep negative schemas out of hot index
         try:
             claim = row["fact_claim"]
-            text = f"[{row['user_id']}/{row.get('room','general')}] {claim[:2000]}"
+            text = f"[{row['user_id']}/{row.get('room', 'general')}] {claim[:2000]}"
             vec = await embed_provider.embed(text)
             new_chroma.add(
                 documents=[text],
-                metadatas=[{
-                    "memory_id": row["id"],
-                    "tenant_id": row.get("tenant_id") or "",
-                    "user_id": row["user_id"],
-                    "session_id": row.get("session_id") or "",
-                    "memory_type": row["memory_type"],
-                    "layer": row["layer"],
-                    "room": row.get("room") or "general",
-                    "wing": f"users/{row['user_id']}",
-                    "category": {
-                        "factual_truth": "fact",
-                        "user_preference": "preference",
-                        "procedure_rule": "procedure",
-                        "episodic_event": "event",
-                    }.get(row["memory_type"], "fact"),
-                    "date": (row.get("created_at") or "")[:10],
-                    "is_negative_schema": False,
-                    "context_tags": "",
-                    "confidence": row.get("confidence") or 0.5,
-                    "importance": row.get("importance") or 0.5,
-                }],
+                metadatas=[
+                    {
+                        "memory_id": row["id"],
+                        "tenant_id": row.get("tenant_id") or "",
+                        "user_id": row["user_id"],
+                        "session_id": row.get("session_id") or "",
+                        "memory_type": row["memory_type"],
+                        "layer": row["layer"],
+                        "room": row.get("room") or "general",
+                        "wing": f"users/{row['user_id']}",
+                        "category": {
+                            "factual_truth": "fact",
+                            "user_preference": "preference",
+                            "procedure_rule": "procedure",
+                            "episodic_event": "event",
+                        }.get(row["memory_type"], "fact"),
+                        "date": (row.get("created_at") or "")[:10],
+                        "is_negative_schema": False,
+                        "context_tags": "",
+                        "confidence": row.get("confidence") or 0.5,
+                        "importance": row.get("importance") or 0.5,
+                    }
+                ],
                 ids=[row["id"]],
                 embeddings=[vec],
             )

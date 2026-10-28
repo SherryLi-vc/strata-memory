@@ -37,8 +37,8 @@ from ..governance.cbt_middleware import CBTMiddleware
 from ..governance.quality_kernel import (
     MAX_CLAIM_CHARS,
     MIN_CLAIM_CHARS,
-    QualityKernel,
     SECRET_PATTERNS,
+    QualityKernel,
 )
 from ..storage.truth_store import DEFAULT_TTL, LAYER_DEFAULT, TruthStore
 
@@ -270,11 +270,19 @@ def migrate_palace(
 
     if not palace.exists():
         report.errors += 1
-        report.items.append(MigratedItem(
-            source_path=str(palace), user_id="", tenant_id="", room="",
-            memory_type="", fact_claim="", content_hash="",
-            status="error", reason="Palace path does not exist",
-        ))
+        report.items.append(
+            MigratedItem(
+                source_path=str(palace),
+                user_id="",
+                tenant_id="",
+                room="",
+                memory_type="",
+                fact_claim="",
+                content_hash="",
+                status="error",
+                reason="Palace path does not exist",
+            )
+        )
         return report
 
     if config is None:
@@ -293,18 +301,25 @@ def migrate_palace(
         store = TruthStore(truth_db_path(palace))
 
     cbt = CBTMiddleware(enabled=True)
-    kernel = QualityKernel(min_confidence=0.1)  # migration uses own confidence floor
 
     for fp in iter_markdown_sources(palace):
         report.files_scanned += 1
         meta, body = _load_post(fp)
         if not body:
             report.skipped += 1
-            report.items.append(MigratedItem(
-                source_path=str(fp), user_id="", tenant_id="", room=str(meta.get("room", "")),
-                memory_type="", fact_claim="", content_hash="",
-                status="skipped", reason="empty body",
-            ))
+            report.items.append(
+                MigratedItem(
+                    source_path=str(fp),
+                    user_id="",
+                    tenant_id="",
+                    room=str(meta.get("room", "")),
+                    memory_type="",
+                    fact_claim="",
+                    content_hash="",
+                    status="skipped",
+                    reason="empty body",
+                )
+            )
             continue
 
         wing = str(meta.get("wing") or "")
@@ -355,11 +370,19 @@ def migrate_palace(
         claims = _split_claims(body)
         if not claims:
             report.skipped += 1
-            report.items.append(MigratedItem(
-                source_path=str(fp), user_id=user_id, tenant_id=tenant_id, room=room,
-                memory_type=memory_type, fact_claim="", content_hash="",
-                status="skipped", reason="no claims extracted",
-            ))
+            report.items.append(
+                MigratedItem(
+                    source_path=str(fp),
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    room=room,
+                    memory_type=memory_type,
+                    fact_claim="",
+                    content_hash="",
+                    status="skipped",
+                    reason="no claims extracted",
+                )
+            )
             continue
 
         for claim in claims:
@@ -371,12 +394,19 @@ def migrate_palace(
                 red = cbt.redact(raw)
                 if skip_secrets and (red.redacted is False or _contains_secret(red.text)):
                     report.skipped += 1
-                    report.items.append(MigratedItem(
-                        source_path=str(fp), user_id=user_id, tenant_id=tenant_id,
-                        room=room, memory_type=memory_type, fact_claim=raw[:120],
-                        content_hash="", status="skipped",
-                        reason="SECRET_DETECTED — not migrated",
-                    ))
+                    report.items.append(
+                        MigratedItem(
+                            source_path=str(fp),
+                            user_id=user_id,
+                            tenant_id=tenant_id,
+                            room=room,
+                            memory_type=memory_type,
+                            fact_claim=raw[:120],
+                            content_hash="",
+                            status="skipped",
+                            reason="SECRET_DETECTED — not migrated",
+                        )
+                    )
                     continue
                 raw = red.text
 
@@ -405,11 +435,19 @@ def migrate_palace(
             # Soft length clamp
             if len(raw) < MIN_CLAIM_CHARS:
                 report.skipped += 1
-                report.items.append(MigratedItem(
-                    source_path=str(fp), user_id=user_id, tenant_id=tenant_id,
-                    room=room, memory_type=memory_type, fact_claim=raw,
-                    content_hash="", status="skipped", reason="CLAIM_TOO_SHORT",
-                ))
+                report.items.append(
+                    MigratedItem(
+                        source_path=str(fp),
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        room=room,
+                        memory_type=memory_type,
+                        fact_claim=raw,
+                        content_hash="",
+                        status="skipped",
+                        reason="CLAIM_TOO_SHORT",
+                    )
+                )
                 continue
             if len(raw) > MAX_CLAIM_CHARS:
                 raw = raw[: MAX_CLAIM_CHARS - 3] + "..."
@@ -429,23 +467,37 @@ def migrate_palace(
                 report.deduped += 1
                 if not dry_run and store:
                     store.touch(existing["id"])
-                report.items.append(MigratedItem(
-                    source_path=str(fp), user_id=user_id, tenant_id=tenant_id,
-                    room=room, memory_type=memory_type, fact_claim=raw[:200],
-                    content_hash=chash, status="deduped",
-                    reason="content_hash already in SoT",
-                    memory_id=existing["id"],
-                ))
+                report.items.append(
+                    MigratedItem(
+                        source_path=str(fp),
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        room=room,
+                        memory_type=memory_type,
+                        fact_claim=raw[:200],
+                        content_hash=chash,
+                        status="deduped",
+                        reason="content_hash already in SoT",
+                        memory_id=existing["id"],
+                    )
+                )
                 continue
 
             if dry_run:
                 report.imported += 1  # would import
-                report.items.append(MigratedItem(
-                    source_path=str(fp), user_id=user_id, tenant_id=tenant_id,
-                    room=room, memory_type=memory_type, fact_claim=raw[:200],
-                    content_hash=chash, status="imported",
-                    reason="dry_run preview",
-                ))
+                report.items.append(
+                    MigratedItem(
+                        source_path=str(fp),
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        room=room,
+                        memory_type=memory_type,
+                        fact_claim=raw[:200],
+                        content_hash=chash,
+                        status="imported",
+                        reason="dry_run preview",
+                    )
+                )
                 continue
 
             assert store is not None
@@ -474,24 +526,40 @@ def migrate_palace(
                 if usage > 0:
                     with store._conn() as conn:
                         conn.execute(
-                            "UPDATE memories SET usage_count=?, last_accessed=COALESCE(last_accessed, created_at) WHERE id=?",
+                            "UPDATE memories SET usage_count=?, "
+                            "last_accessed=COALESCE(last_accessed, created_at) WHERE id=?",
                             (usage, row["id"]),
                         )
                 report.imported += 1
-                report.items.append(MigratedItem(
-                    source_path=str(fp), user_id=user_id, tenant_id=tenant_id,
-                    room=room, memory_type=memory_type, fact_claim=raw[:200],
-                    content_hash=chash, status="imported",
-                    memory_id=row["id"],
-                    reason=f"layer={layer}",
-                ))
+                report.items.append(
+                    MigratedItem(
+                        source_path=str(fp),
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        room=room,
+                        memory_type=memory_type,
+                        fact_claim=raw[:200],
+                        content_hash=chash,
+                        status="imported",
+                        memory_id=row["id"],
+                        reason=f"layer={layer}",
+                    )
+                )
             except Exception as e:
                 report.errors += 1
-                report.items.append(MigratedItem(
-                    source_path=str(fp), user_id=user_id, tenant_id=tenant_id,
-                    room=room, memory_type=memory_type, fact_claim=raw[:200],
-                    content_hash=chash, status="error", reason=str(e),
-                ))
+                report.items.append(
+                    MigratedItem(
+                        source_path=str(fp),
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        room=room,
+                        memory_type=memory_type,
+                        fact_claim=raw[:200],
+                        content_hash=chash,
+                        status="error",
+                        reason=str(e),
+                    )
+                )
 
     if not dry_run and store:
         store.audit(
@@ -507,6 +575,7 @@ def migrate_palace(
     # Optional vector rebuild (async-friendly caller can pass providers)
     if rebuild_vectors and not dry_run and embed_provider is not None and chroma is not None and store is not None:
         import asyncio
+
         from .rebuild import strata_rebuild_index
 
         async def _rebuild():

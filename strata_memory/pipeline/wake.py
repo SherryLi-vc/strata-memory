@@ -14,7 +14,6 @@ V2 adds: intent classification, SQLite KG, RRF fusion, state-dependent boosting.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from ..config import Config
 from ..embedding import EmbeddingProvider
@@ -41,7 +40,7 @@ async def wake_up(
     # 0. L0 Profile (permanent context — decontextualized facts, procedures)
     l0 = read_l0_profile(palace, wing)
     if l0:
-        l0_trimmed = l0[:config.l0_token_budget * 3]  # Rough char budget
+        l0_trimmed = l0[: config.l0_token_budget * 3]  # Rough char budget
         parts.append("## Core Profile (L0 — Permanent)\n")
         parts.append(l0_trimmed)
         parts.append("")

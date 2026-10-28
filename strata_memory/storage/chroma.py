@@ -41,8 +41,7 @@ class ChromaStore:
             metadata={"hnsw:space": "cosine"},
         )
 
-    def add(self, documents: list[str], metadatas: list[dict],
-            ids: list[str], embeddings: list[list[float]]) -> None:
+    def add(self, documents: list[str], metadatas: list[dict], ids: list[str], embeddings: list[list[float]]) -> None:
         """Add documents to the vector store (upsert)."""
         col = self._collection()
         col.upsert(
@@ -52,8 +51,7 @@ class ChromaStore:
             embeddings=embeddings,
         )
 
-    def query(self, query_embedding: list[float], top_k: int = 10,
-              where: Optional[dict] = None) -> list[dict]:
+    def query(self, query_embedding: list[float], top_k: int = 10, where: Optional[dict] = None) -> list[dict]:
         """Semantic search returning top-K results."""
         col = self._collection()
         results = col.query(
@@ -66,12 +64,14 @@ class ChromaStore:
         if not results["ids"] or not results["ids"][0]:
             return items
         for i, doc_id in enumerate(results["ids"][0]):
-            items.append({
-                "id": doc_id,
-                "document": results["documents"][0][i] if results["documents"] else "",
-                "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
-                "distance": results["distances"][0][i] if results["distances"] else 0.0,
-            })
+            items.append(
+                {
+                    "id": doc_id,
+                    "document": results["documents"][0][i] if results["documents"] else "",
+                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
+                    "distance": results["distances"][0][i] if results["distances"] else 0.0,
+                }
+            )
         return items
 
     def delete_by_wing(self, wing: str) -> int:

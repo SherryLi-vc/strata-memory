@@ -6,7 +6,8 @@ Design laws:
   - Markdown is read-only projection
   - Dual-mode: personal (CBT) / company (tenant isolation + audit)
 
-Secrets never persisted: use STRATA_API_KEY env var.
+Secrets never persisted: use STRATA_API_KEY or STRATA_EMBEDDING_API_KEY.
+Embedding provider, base URL, and model come from the environment when set.
 """
 
 from __future__ import annotations
@@ -15,8 +16,41 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
+
+# Built-in defaults. SiliconFlow is the default option, not the only one.
+DEFAULT_EMBEDDING_PROVIDER = "siliconflow"
+_PROVIDER_DEFAULTS: dict[str, dict[str, object]] = {
+    "siliconflow": {
+        "model": "BAAI/bge-m3",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "dimension": 384,
+    },
+    "openai": {
+        "model": "text-embedding-3-small",
+        "base_url": "https://api.openai.com/v1",
+        "dimension": 1536,
+    },
+    "openai_compatible": {
+        "model": "text-embedding-3-small",
+        "base_url": "https://api.openai.com/v1",
+        "dimension": 1536,
+    },
+    "local": {
+        "model": "sentence-transformers/all-MiniLM-L6-v2",
+        "base_url": "",
+        "dimension": 384,
+    },
+}
+_PROVIDER_ALIASES = {
+    "openai-compatible": "openai_compatible",
+    "local_onnx": "local",
+    "self_hosted": "openai_compatible",
+    "cloud": "openai_compatible",
+}
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 # Category-specific decay (legacy scoring compatibility)
@@ -38,12 +72,12 @@ CATEGORY_DECAY_RATES: dict[str, float] = {
 
 
 class EmbeddingConfig(BaseModel):
-    provider: str = "siliconflow"
+    provider: str = DEFAULT_EMBEDDING_PROVIDER
     model: str = "BAAI/bge-m3"
     api_key: str = Field(default="", exclude=True)
     base_url: str = "https://api.siliconflow.cn/v1"
     dimension: int = 384
-    mode: str = "cloud"  # cloud | local_onnx | self_hosted
+    mode: str = "cloud"  # cloud | local
 
 
 class CBTConfig(BaseModel):
@@ -159,33 +193,156 @@ def api_key_status(key: Optional[str]) -> dict:
     }
 
 
-def resolve_api_key(explicit: str = "") -> str:
+def normalize_embedding_provider(provider: str) -> str:
+    """Map aliases to siliconflow, openai, openai_compatible, or local."""
+    raw = (provider or DEFAULT_EMBEDDING_PROVIDER).strip().lower().replace(" ", "_")
+    kind = _PROVIDER_ALIASES.get(raw, raw)
+    if kind not in _PROVIDER_DEFAULTS:
+        known = ", ".join(sorted(_PROVIDER_DEFAULTS))
+        raise ValueError(f"Unknown embedding provider: {provider}. Use one of: {known}.")
+    return kind
+
+
+def truncate_embeddings(provider: str, model: str) -> bool:
+    """Whether to keep only the first ``dimension`` values of a longer vector.
+
+    Default: SiliconFlow BAAI/bge-m3 (Matryoshka). Override with
+    STRATA_EMBEDDING_TRUNCATE=1 or 0.
+    """
+    flag = (os.environ.get("STRATA_EMBEDDING_TRUNCATE") or "").strip().lower()
+    if flag in {"1", "true", "yes"}:
+        return True
+    if flag in {"0", "false", "no"}:
+        return False
+    kind = normalize_embedding_provider(provider)
+    return kind == "siliconflow" and "bge-m3" in (model or "").lower()
+
+
+def embedding_requires_api_key(provider: str, base_url: str = "") -> bool:
+    """Cloud endpoints need a key. In-process local models and loopback servers do not."""
+    kind = normalize_embedding_provider(provider)
+    if kind == "local":
+        return False
+    flag = (os.environ.get("STRATA_EMBEDDING_ALLOW_EMPTY_KEY") or "").strip().lower()
+    if flag in {"1", "true", "yes"}:
+        return False
+    host = (urlparse(base_url or "").hostname or "").lower()
+    if host in _LOOPBACK_HOSTS:
+        return False
+    return True
+
+
+def resolve_api_key(explicit: str = "", provider: str = "") -> str:
     """Resolve embedding API key with env precedence.
 
     Order:
-      1. explicit argument (e.g. tool param)
-      2. STRATA_API_KEY
-      3. SILICONFLOW_API_KEY
-      4. OPENAI_API_KEY (last resort for compatible gateways)
+      1. explicit argument (tool param or already-resolved config value)
+      2. STRATA_EMBEDDING_API_KEY
+      3. STRATA_API_KEY
+      4. provider key: SILICONFLOW_API_KEY for SiliconFlow, OPENAI_API_KEY otherwise
+      5. the other of those two, so an existing key still works after a provider change
 
-    Unusable / redacted values are ignored so a truncated openclaw key
-    does not shadow a valid env var later in the chain... actually we
-    only have one env per name; truncation usually *is* the env value.
+    Unusable values are skipped until every candidate is unusable. Then the
+    first non-empty raw value is returned for diagnostics.
     """
+    kind = ""
+    if provider:
+        try:
+            kind = normalize_embedding_provider(provider)
+        except ValueError:
+            kind = ""
+    if kind == "siliconflow":
+        provider_keys = ("SILICONFLOW_API_KEY", "OPENAI_API_KEY")
+    elif kind in {"openai", "openai_compatible"}:
+        provider_keys = ("OPENAI_API_KEY", "SILICONFLOW_API_KEY")
+    else:
+        provider_keys = ("SILICONFLOW_API_KEY", "OPENAI_API_KEY")
     candidates = [
         explicit,
+        os.environ.get("STRATA_EMBEDDING_API_KEY", ""),
         os.environ.get("STRATA_API_KEY", ""),
-        os.environ.get("SILICONFLOW_API_KEY", ""),
-        os.environ.get("OPENAI_API_KEY", ""),
+        *[os.environ.get(name, "") for name in provider_keys],
     ]
     for c in candidates:
         if is_usable_api_key(c):
             return c.strip()
-    # Return first non-empty raw for diagnostics (caller checks usable)
     for c in candidates:
         if c and str(c).strip():
             return str(c).strip()
     return ""
+
+
+def _env_str(name: str) -> str:
+    return (os.environ.get(name) or "").strip()
+
+
+def resolve_embedding_settings(
+    saved: Optional[EmbeddingConfig] = None,
+    overrides: Optional[dict] = None,
+) -> EmbeddingConfig:
+    """Effective embedding settings.
+
+    Precedence for each field: explicit override, then environment, then the
+    saved config. Switching provider (override or env) without also setting
+    model, base URL, or dimension uses that provider's defaults.
+    """
+    saved = saved or EmbeddingConfig()
+    overrides = {k: v for k, v in (overrides or {}).items() if v is not None and str(v).strip() != ""}
+    saved_kind = normalize_embedding_provider(saved.provider or DEFAULT_EMBEDDING_PROVIDER)
+
+    if "provider" in overrides:
+        provider = normalize_embedding_provider(str(overrides["provider"]))
+    elif _env_str("STRATA_EMBEDDING_PROVIDER"):
+        provider = normalize_embedding_provider(_env_str("STRATA_EMBEDDING_PROVIDER"))
+    else:
+        provider = saved_kind
+    spec = _PROVIDER_DEFAULTS[provider]
+    switched = provider != saved_kind
+
+    if "model" in overrides:
+        model = str(overrides["model"]).strip()
+    elif _env_str("STRATA_EMBEDDING_MODEL"):
+        model = _env_str("STRATA_EMBEDDING_MODEL")
+    elif switched:
+        model = str(spec["model"])
+    else:
+        model = saved.model or str(spec["model"])
+
+    if "base_url" in overrides:
+        base_url = str(overrides["base_url"]).strip().rstrip("/")
+    elif _env_str("STRATA_EMBEDDING_BASE_URL"):
+        base_url = _env_str("STRATA_EMBEDDING_BASE_URL").rstrip("/")
+    elif provider == "local":
+        base_url = ""
+    elif switched:
+        base_url = str(spec["base_url"])
+    else:
+        base_url = (saved.base_url or str(spec["base_url"])).rstrip("/")
+
+    if "dimension" in overrides:
+        dimension = int(overrides["dimension"])
+    elif _env_str("STRATA_EMBEDDING_DIMENSION"):
+        dimension = int(_env_str("STRATA_EMBEDDING_DIMENSION"))
+    elif switched:
+        dimension = int(spec["dimension"])
+    else:
+        dimension = int(saved.dimension or spec["dimension"])
+    if dimension < 1:
+        raise ValueError("STRATA_EMBEDDING_DIMENSION must be a positive integer.")
+
+    explicit_key = str(overrides.get("api_key") or "")
+    if explicit_key:
+        key = resolve_api_key(explicit_key, provider=provider)
+    else:
+        key = resolve_api_key("", provider=provider) or (saved.api_key or "")
+    return EmbeddingConfig(
+        provider=provider,
+        model=model,
+        api_key=key,
+        base_url=base_url,
+        dimension=dimension,
+        mode="local" if provider == "local" else "cloud",
+    )
 
 
 def load_config(palace_path: Optional[str] = None) -> Config:
@@ -202,10 +359,8 @@ def load_config(palace_path: Optional[str] = None) -> Config:
         cfg.palace_path = str(palace)
     else:
         cfg = Config(palace_path=str(palace))
-    # Env / resolved key always wins over empty persisted config
-    resolved = resolve_api_key(cfg.embedding.api_key or "")
-    if resolved:
-        cfg.embedding.api_key = resolved
+    # Env overrides provider, model, base URL, dimension, and key when set.
+    cfg.embedding = resolve_embedding_settings(cfg.embedding)
     return cfg
 
 

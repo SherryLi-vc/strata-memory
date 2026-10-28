@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
-import pytest
-
 from strata_memory.config import api_key_status, is_usable_api_key, resolve_api_key
 
 
@@ -27,6 +23,7 @@ def test_accepts_full_key():
 
 
 def test_resolve_prefers_env(monkeypatch):
+    monkeypatch.delenv("STRATA_EMBEDDING_API_KEY", raising=False)
     monkeypatch.setenv("STRATA_API_KEY", "sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     monkeypatch.delenv("SILICONFLOW_API_KEY", raising=False)
     k = resolve_api_key("")
@@ -35,6 +32,7 @@ def test_resolve_prefers_env(monkeypatch):
 
 def test_resolve_skips_redacted_env_for_fallback(monkeypatch):
     # Redacted env is unusable; fall through to siliconflow env
+    monkeypatch.delenv("STRATA_EMBEDDING_API_KEY", raising=False)
     monkeypatch.setenv("STRATA_API_KEY", "sk-tqz...wxiu")
     monkeypatch.setenv("SILICONFLOW_API_KEY", "sk-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     k = resolve_api_key("")
@@ -42,6 +40,7 @@ def test_resolve_skips_redacted_env_for_fallback(monkeypatch):
 
 
 def test_resolve_returns_bad_if_all_bad(monkeypatch):
+    monkeypatch.delenv("STRATA_EMBEDDING_API_KEY", raising=False)
     monkeypatch.setenv("STRATA_API_KEY", "sk-tqz...wxiu")
     monkeypatch.delenv("SILICONFLOW_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

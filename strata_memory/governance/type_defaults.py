@@ -8,13 +8,15 @@ from __future__ import annotations
 from typing import Any, Optional
 
 # Canonical types (3.0 adds decision_record)
-MEMORY_TYPES = frozenset({
-    "factual_truth",
-    "user_preference",
-    "procedure_rule",
-    "episodic_event",
-    "decision_record",
-})
+MEMORY_TYPES = frozenset(
+    {
+        "factual_truth",
+        "user_preference",
+        "procedure_rule",
+        "episodic_event",
+        "decision_record",
+    }
+)
 
 # ttl_days: None = permanent until superseded
 TYPE_DEFAULTS: dict[str, dict[str, Any]] = {

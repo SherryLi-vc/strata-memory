@@ -5,9 +5,9 @@ Welcome to Strata Memory. We're glad you're here.
 ## Development Setup
 
 ```bash
-git clone https://github.com/vincy/strata-memory.git
+git clone https://github.com/SherryLi-vc/strata-memory.git
 cd strata-memory
-uv sync --group dev
+uv sync --extra dev
 ```
 
 ## Development Workflow

@@ -50,13 +50,18 @@ def cmd_init() -> None:
     ensure_palace(palace)
     save_config(cfg)
     TruthStore(truth_db_path(palace))
-    print(json.dumps({
-        "status": "ok",
-        "version": "2.0.0",
-        "palace": palace_path,
-        "truth_db": str(truth_db_path(palace)),
-        "mode": mode,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "version": "2.0.0",
+                "palace": palace_path,
+                "truth_db": str(truth_db_path(palace)),
+                "mode": mode,
+            },
+            indent=2,
+        )
+    )
 
 
 def cmd_doctor() -> None:
@@ -101,11 +106,13 @@ def cmd_project() -> None:
 
     cfg = load_config()
     store = TruthStore(truth_db_path(Path(cfg.palace_path)))
-    print(json.dumps(
-        dump_markdown_projection(store, Path(cfg.palace_path)),
-        indent=2,
-        ensure_ascii=False,
-    ))
+    print(
+        json.dumps(
+            dump_markdown_projection(store, Path(cfg.palace_path)),
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 def cmd_migrate() -> None:
@@ -119,15 +126,13 @@ def cmd_migrate() -> None:
 
 def cmd_serve() -> None:
     from .server import run
+
     asyncio.run(run())
 
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print(
-            "Usage: python -m strata_memory.cli "
-            "{init|doctor|stats|digest|project|migrate|serve}"
-        )
+        print("Usage: python -m strata_memory.cli {init|doctor|stats|digest|project|migrate|serve}")
         sys.exit(1)
     cmd = sys.argv[1]
     handlers = {
@@ -141,10 +146,7 @@ def main() -> None:
     }
     if cmd not in handlers:
         print(f"Unknown command: {cmd}")
-        print(
-            "Usage: python -m strata_memory.cli "
-            "{init|doctor|stats|digest|project|migrate|serve}"
-        )
+        print("Usage: python -m strata_memory.cli {init|doctor|stats|digest|project|migrate|serve}")
         sys.exit(1)
     handlers[cmd]()
 

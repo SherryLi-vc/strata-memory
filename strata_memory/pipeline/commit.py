@@ -161,6 +161,7 @@ async def commit_memory(
 
     try:
         from .scoring import estimate_emotional_salience
+
         sal = estimate_emotional_salience(claim)
         if sal > 0:
             with store._conn() as conn:
@@ -173,34 +174,31 @@ async def commit_memory(
         pass
 
     indexed = False
-    if (
-        not force_scratch
-        and embed_provider is not None
-        and chroma is not None
-        and not assessment.is_negative_schema
-    ):
+    if not force_scratch and embed_provider is not None and chroma is not None and not assessment.is_negative_schema:
         try:
             text = f"[{user_id}/{room}] {claim[:2000]}"
             vec = await embed_provider.embed(text)
             chroma.add(
                 documents=[text],
-                metadatas=[{
-                    "memory_id": row["id"],
-                    "tenant_id": tenant_id,
-                    "user_id": user_id,
-                    "session_id": session_id or "",
-                    "memory_type": verdict.memory_type,
-                    "layer": layer,
-                    "room": room or "general",
-                    "confidence": verdict.confidence,
-                    "importance": verdict.importance,
-                    "is_negative_schema": False,
-                    "context_tags": ",".join(context_tags or []),
-                    "entity": entity or "",
-                    "wing": f"users/{user_id}",
-                    "category": _type_to_legacy_category(verdict.memory_type),
-                    "date": row["created_at"][:10],
-                }],
+                metadatas=[
+                    {
+                        "memory_id": row["id"],
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "session_id": session_id or "",
+                        "memory_type": verdict.memory_type,
+                        "layer": layer,
+                        "room": room or "general",
+                        "confidence": verdict.confidence,
+                        "importance": verdict.importance,
+                        "is_negative_schema": False,
+                        "context_tags": ",".join(context_tags or []),
+                        "entity": entity or "",
+                        "wing": f"users/{user_id}",
+                        "category": _type_to_legacy_category(verdict.memory_type),
+                        "date": row["created_at"][:10],
+                    }
+                ],
                 ids=[row["id"]],
                 embeddings=[vec],
             )
@@ -226,10 +224,7 @@ async def commit_memory(
         user_id=user_id,
         session_id=session_id,
         target=row["id"],
-        summary=(
-            f"type={verdict.memory_type} layer={layer} scratch={force_scratch} "
-            f"supersedes={supersedes_id or '-'}"
-        ),
+        summary=(f"type={verdict.memory_type} layer={layer} scratch={force_scratch} supersedes={supersedes_id or '-'}"),
         after=claim[:200],
     )
 
@@ -307,24 +302,26 @@ async def promote_session(
                 continue
             try:
                 claim = row["fact_claim"]
-                text = f"[{user_id}/{row.get('room','general')}] {claim[:2000]}"
+                text = f"[{user_id}/{row.get('room', 'general')}] {claim[:2000]}"
                 vec = await embed_provider.embed(text)
                 chroma.add(
                     documents=[text],
-                    metadatas=[{
-                        "memory_id": mid,
-                        "tenant_id": tenant_id,
-                        "user_id": user_id,
-                        "memory_type": row["memory_type"],
-                        "layer": row["layer"],
-                        "room": row.get("room", "general"),
-                        "wing": f"users/{user_id}",
-                        "category": _type_to_legacy_category(row["memory_type"]),
-                        "date": (row.get("created_at") or "")[:10],
-                        "is_negative_schema": False,
-                        "context_tags": "",
-                        "entity": row.get("entity") or "",
-                    }],
+                    metadatas=[
+                        {
+                            "memory_id": mid,
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "memory_type": row["memory_type"],
+                            "layer": row["layer"],
+                            "room": row.get("room", "general"),
+                            "wing": f"users/{user_id}",
+                            "category": _type_to_legacy_category(row["memory_type"]),
+                            "date": (row.get("created_at") or "")[:10],
+                            "is_negative_schema": False,
+                            "context_tags": "",
+                            "entity": row.get("entity") or "",
+                        }
+                    ],
                     ids=[mid],
                     embeddings=[vec],
                 )

@@ -27,9 +27,7 @@ def run_digest(
     kept = 0
     actions: list[dict[str, Any]] = []
 
-    candidates = store.candidates_for_digest(
-        older_than_days=max(1, config.l3_demotion_days)
-    )
+    candidates = store.candidates_for_digest(older_than_days=max(1, config.l3_demotion_days))
     # Full durable scan for TTL + score decisions
     rows = store.iter_for_index(tenant_id=config.tenant_id or "")
     by_id = {r["id"]: r for r in rows}

@@ -29,7 +29,7 @@ Please do NOT open a public issue for security vulnerabilities.
 - **Parameterized SQL**: all queries bound; LIMIT clamped
 - **Path sandbox**: legacy Markdown paths still resolve inside palace
 - **Audit + trajectory**: every tool call logged for post-incident review
-- **Air-gapped ready**: embedding can be cloud or self-hosted; SoT never requires network
+- **Local SoT**: SQLite never leaves the machine. The configured embedding endpoint receives memory text and recall queries unless `STRATA_EMBEDDING_PROVIDER=local` (in-process). SiliconFlow (`BAAI/bge-m3` at `https://api.siliconflow.cn/v1`) is the default. `openai` / `openai_compatible` send the same text to `STRATA_EMBEDDING_BASE_URL`. Loopback base URLs and the local provider do not require an API key.
 
 ## Zero-trust defaults
 
