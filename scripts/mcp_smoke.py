@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MCP initialize + list_tools against an installed strata-memory-mcp binary.
 
-    python scripts/mcp_smoke.py /path/to/strata-memory-mcp
+python scripts/mcp_smoke.py /path/to/strata-memory-mcp
 """
 
 from __future__ import annotations
