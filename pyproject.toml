@@ -43,8 +43,8 @@ strata-memory-mcp = "strata_memory.__main__:main"
 strata-memory-migrate = "strata_memory.ops.migrate_v02:main"
 
 [project.urls]
-Homepage = "https://github.com/vincy/strata-memory"
-Issues = "https://github.com/vincy/strata-memory/issues"
+Homepage = "https://github.com/SherryLi-vc/strata-memory"
+Issues = "https://github.com/SherryLi-vc/strata-memory/issues"
 
 [build-system]
 requires = ["setuptools>=68.0"]

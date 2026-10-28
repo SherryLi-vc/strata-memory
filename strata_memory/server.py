@@ -1,12 +1,13 @@
-"""Strata Memory MCP Server v2.0.0 — Industrial AI Memory Base.
+"""Strata Memory MCP Server v2.1.0 — Industrial AI Memory Base.
 
 Core philosophy: LLM decides; deterministic code executes.
 
-Tool surface (intent-aggregated, < 15):
+Tool surface (11, intent-aggregated):
   Setup:   strata_init
   Write:   commit_memory, promote_session
   Read:    recall_context, expand_memory_detail
-  Ops:     strata_doctor, strata_rebuild_index, strata_stats, strata_project
+  Ops:     strata_doctor, strata_rebuild_index, strata_stats, strata_project,
+           strata_digest, strata_hygiene
 
 All descriptions follow: 作用 + 触发 + 禁忌 (three-part defensive contract).
 """
@@ -104,7 +105,7 @@ def _ensure_embed_provider(config: Config) -> Optional[EmbeddingProvider]:
                 "Or put STRATA_API_KEY into ~/.hermes/.env and use the updated strata-wrapper.sh.\n"
                 "Do NOT read OpenClaw memorySearch.remote.apiKey if it contains '...' "
                 "(that is a UI-redacted placeholder).\n"
-                "Verify: strata_doctor → embedding.api_key.usable must be true."
+                "Verify: strata_doctor → summary.api_key.usable must be true."
             ),
             retry_safe=True,
             fields={"api_key_status": status, "provider": provider},
@@ -673,7 +674,7 @@ async def _handle_init(args: dict) -> dict:
         "api_key_configured": is_usable_api_key(api_key),
         "api_key_status": key_stat,
         "next": [
-            "strata_doctor() — confirm embedding.api_key.usable=true",
+            "strata_doctor() — confirm summary.api_key.usable=true",
             "commit_memory(...) to write facts",
             "recall_context(...) at session start",
         ],

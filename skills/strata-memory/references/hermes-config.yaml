@@ -1,0 +1,21 @@
+# Merge into ~/.hermes/config.yaml under mcp_servers.
+# Do not replace the rest of the file.
+#
+# The user sets these in ~/.hermes/.env (full key, never a sk-xxx...yyy placeholder,
+# and never a value pasted into chat):
+#   STRATA_API_KEY=<full SiliconFlow key>
+#   STRATA_DIR=/absolute/path/to/strata-memory
+#   STRATA_PALACE=~/.strata/palace
+#
+# Launcher, from the clone:
+#   mkdir -p ~/.hermes/scripts
+#   cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh
+#   chmod +x ~/.hermes/scripts/strata-wrapper.sh
+#
+# command must be the absolute path of that script.
+
+mcp_servers:
+  strata-memory:
+    enabled: true
+    command: /absolute/path/to/.hermes/scripts/strata-wrapper.sh
+    timeout: 120

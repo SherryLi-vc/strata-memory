@@ -2,8 +2,12 @@
 
 ## Env
 
-- `STRATA_API_KEY` — embedding provider key (preferred over tool args)
+- `STRATA_API_KEY` — SiliconFlow key for `BAAI/bge-m3`. Set it in the host environment. Never paste it into chat.
 - `STRATA_PALACE` — data root (default `~/.strata/palace`)
+
+Embeddings call `https://api.siliconflow.cn/v1`. Memory text and recall queries are sent there. SQLite stays local.
+
+Operating procedure and host templates: `skills/strata-memory/SKILL.md`.
 
 ## Tool flow
 

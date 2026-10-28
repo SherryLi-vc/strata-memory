@@ -1,21 +1,21 @@
-# Hermes MCP config snippet for Strata Memory 2.0
+# Merge into ~/.hermes/config.yaml under mcp_servers.
+# Canonical copy: skills/strata-memory/references/hermes-config.yaml
 #
-# 1) Put the FULL SiliconFlow key in ~/.hermes/.env (recommended):
-#      STRATA_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-#    Do NOT use OpenClaw redacted form sk-xxx...yyy
+# The user sets these in ~/.hermes/.env (full key, never a sk-xxx...yyy placeholder,
+# and never a value pasted into chat):
+#   STRATA_API_KEY=<full SiliconFlow key>
+#   STRATA_DIR=/absolute/path/to/strata-memory
+#   STRATA_PALACE=~/.strata/palace
 #
-# 2) Install wrapper:
-#      cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh
-#      chmod +x ~/.hermes/scripts/strata-wrapper.sh
+# Launcher, from the clone:
+#   mkdir -p ~/.hermes/scripts
+#   cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh
+#   chmod +x ~/.hermes/scripts/strata-wrapper.sh
 #
-# 3) Merge into ~/.hermes/config.yaml under mcp_servers:
+# command must be the absolute path of that script.
 
 mcp_servers:
   strata-memory:
     enabled: true
-    command: /Users/vizhangkk/.hermes/scripts/strata-wrapper.sh
-    # optional explicit env (prefer ~/.hermes/.env over hardcoding secrets here)
-    # env:
-    #   STRATA_API_KEY: sk-...
-    #   STRATA_PALACE: /Users/vizhangkk/.strata/palace
+    command: /absolute/path/to/.hermes/scripts/strata-wrapper.sh
     timeout: 120

@@ -4,7 +4,6 @@
   <img src="./assets/memory.png" alt="Strata Memory" width="80%">
 </p>
 
-[![PyPI](https://img.shields.io/pypi/v/strata-memory-mcp.svg)](https://pypi.org/project/strata-memory-mcp/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.org)
 
@@ -29,49 +28,54 @@ Strata Memory 2.0 是面向 Multi-Agent 的 **MCP 记忆中枢**：以 **SQLite 
 
 ## 快速开始
 
-```bash
-# 推荐：环境变量注入密钥（禁止写入对话与 config 明文）
-export STRATA_API_KEY=sk-...
-# 可选：自定义 Palace 路径
-export STRATA_PALACE=~/.strata/palace
-
-uvx strata-memory-mcp
-# 或
-git clone https://github.com/vincy/strata-memory.git
-cd strata-memory && uv sync && uv run strata-memory-mcp
-```
-
-### Claude Desktop
-
-```json
-{
-  "mcpServers": {
-    "strata-memory": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/strata-memory", "strata-memory-mcp"],
-      "env": {
-        "STRATA_API_KEY": "sk-...",
-        "STRATA_PALACE": "/path/to/palace"
-      }
-    }
-  }
-}
-```
-
-### Hermes
+`strata-memory-mcp` 还没有发布到 PyPI，不要使用 `uvx strata-memory-mcp`。从本仓库安装（需要 Python 3.11+、`uv`、`git`）：
 
 ```bash
-# 推荐：完整 key 写入 Hermes env（禁止 sk-xxx...yyy 脱敏占位）
-echo 'STRATA_API_KEY=sk-你的完整key' >> ~/.hermes/.env
-
-cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh
-chmod +x ~/.hermes/scripts/strata-wrapper.sh
-# config.yaml → mcp_servers.strata-memory.command = wrapper 路径
+git clone https://github.com/SherryLi-vc/strata-memory.git
+cd strata-memory
+uv sync
+export STRATA_PALACE="${STRATA_PALACE:-$HOME/.strata/palace}"
+uv run strata-memory-mcp
 ```
 
-更多客户端示例见 [examples/](examples/) · [examples/hermes-config.yaml](examples/hermes-config.yaml)。
+在你自己的 shell 配置里设置完整的 SiliconFlow API key（`STRATA_API_KEY`）。不要把 key 贴进对话、写进仓库，或写成带 `...` 的脱敏占位符。解析顺序：`STRATA_API_KEY` → `SILICONFLOW_API_KEY` → `OPENAI_API_KEY`。
 
-## MCP 工具（10 个，意图聚合）
+**网络：** 当前唯一实现的嵌入提供方是 SiliconFlow（模型 `BAAI/bge-m3`，端点 `https://api.siliconflow.cn/v1`）。写入记忆和召回查询会把文本发到该 API 做向量。SQLite 真相源留在本机 `STRATA_PALACE`（默认 `~/.strata/palace`）。
+
+### 宿主配置
+
+模板在 [`skills/strata-memory/references/`](skills/strata-memory/references/)。只改路径；密钥由用户在本机填写，对话里不要出现 key。
+
+| 宿主 | 配置位置 | 模板 |
+|------|----------|------|
+| Claude Code | 项目 `.mcp.json`，或 `~/.claude.json` 的 `mcpServers` | `references/claude-code.mcp.json`（`${STRATA_API_KEY}` 由 Claude Code 从环境展开） |
+| Cursor | `~/.cursor/mcp.json` 或项目 `.cursor/mcp.json` | `references/cursor-mcp.json` |
+| Claude Desktop | Settings → Developer → Edit Config。macOS：`~/Library/Application Support/Claude/claude_desktop_config.json`；Windows：`%APPDATA%\Claude\claude_desktop_config.json` | `references/claude-desktop.json` |
+| Hermes | `~/.hermes/config.yaml` 的 `mcp_servers`；key 与 `STRATA_DIR` 写在 `~/.hermes/.env` | `references/hermes-config.yaml` |
+
+Hermes 启动器是 [`examples/strata-wrapper.sh`](examples/strata-wrapper.sh)。把脚本拷到 `~/.hermes/scripts/` 并 `chmod +x`。`STRATA_DIR` 必须指向你的克隆（环境变量或 `~/.hermes/.env`）；脚本不再默认作者本机目录。改完后 `/reload-mcp` 或重启会话。
+
+[examples/cursor-mcp.json](examples/cursor-mcp.json) 与 [examples/hermes-config.yaml](examples/hermes-config.yaml) 和 skill 模板一致，以 skill 目录里的文件为准。
+
+### Agent Skill
+
+[`skills/strata-memory/SKILL.md`](skills/strata-memory/SKILL.md) 是 Claude Code、Cursor、Claude Desktop、Hermes 共用的操作规程。frontmatter `name` 与目录名都是 `strata-memory`。
+
+克隆本仓库后：
+
+- Claude Code 和 Cursor 从 `.claude/skills/strata-memory` 加载
+- Hermes 从 `.hermes/skills/strata-memory` 加载；在仓库里先执行一次 `hermes skills trust`
+- Claude Desktop 不扫描 git 仓库。MCP 用上表接入；需要这段规程时，把 `skills/strata-memory` 打成 zip（顶层是 `strata-memory/SKILL.md`）再在应用里上传
+
+给其他项目全局使用时，把该目录复制到 `~/.claude/skills/strata-memory`、`~/.cursor/skills/strata-memory` 或 `~/.hermes/skills/strata-memory`。
+
+Agensi 打包同一目录：
+
+```bash
+cd skills && zip -r ../strata-memory-agensi.zip strata-memory -x '*.DS_Store'
+```
+
+## MCP 工具（11 个，意图聚合）
 
 | Tool | 意图 |
 |------|------|
@@ -162,7 +166,8 @@ uv run strata-memory-migrate --palace ~/.strata/palace --apply --rebuild-vectors
 
 ## 安全
 
-- 默认本地存储；密钥走 `STRATA_API_KEY`，不落盘明文
+- 记忆存在本地 `STRATA_PALACE`。嵌入请求发往 SiliconFlow（`https://api.siliconflow.cn/v1`）；不要把这一步当成离线
+- 密钥只走环境变量 `STRATA_API_KEY`，不写入 `config.json`，也不要贴进对话
 - 写操作无裸 CRUD；破坏性重建必须 `confirm=true`
 - 跨 `user_id` / `tenant_id` 的 expand 硬失败
 

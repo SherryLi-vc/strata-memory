@@ -30,3 +30,6 @@ chroma/
 # Environment
 .env
 .env.local
+
+# Local Agensi upload bundle. Rebuild with: cd skills && zip -r ../strata-memory-agensi.zip strata-memory
+/strata-memory-agensi.zip

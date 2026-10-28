@@ -148,6 +148,20 @@ Set `dry_run: false` to apply demotions/archives.
 
 ---
 
+## strata_hygiene
+
+```json
+{
+  "dry_run": true,
+  "archive_expired": true,
+  "rebuild_fts": false
+}
+```
+
+Default `dry_run=true`. Set `dry_run=false` to archive expired rows. Do not paste `secret_hits` text into public logs. Optional `user_id` limits the scan.
+
+---
+
 ## Quick matrix
 
 | Tool | Required | Side effects |
@@ -162,3 +176,4 @@ Set `dry_run: false` to apply demotions/archives.
 | strata_stats | — | Read |
 | strata_project | — | Writes projection/ |
 | strata_digest | — | May archive/demote |
+| strata_hygiene | — | May archive expired rows; may rebuild FTS |

@@ -1,12 +1,22 @@
 #!/bin/bash
-# Example Hermes MCP launcher for Strata Memory 2.0.
-# Install: cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh && chmod +x ...
+# Hermes MCP launcher for Strata Memory.
+# Install:
+#   mkdir -p ~/.hermes/scripts
+#   cp examples/strata-wrapper.sh ~/.hermes/scripts/strata-wrapper.sh
+#   chmod +x ~/.hermes/scripts/strata-wrapper.sh
 #
-# See docs in repo README / this script header for key resolution order.
+# Set these yourself (environment or ~/.hermes/.env). Do not paste keys into chat.
+#   STRATA_API_KEY=<full SiliconFlow key>
+#   STRATA_DIR=/absolute/path/to/strata-memory
+# Optional: STRATA_PALACE=~/.strata/palace
+#
+# Key order: STRATA_API_KEY, SILICONFLOW_API_KEY (env, then ~/.hermes/.env),
+# then ~/.strata/api_key, then a non-redacted sk- token in ~/.openclaw/openclaw.json.
+# Values containing "..." are rejected.
 
 set -euo pipefail
 
-STRATA_DIR="${STRATA_DIR:-$HOME/Desktop/个人开发/MCP/strata-memory}"
+STRATA_DIR="${STRATA_DIR:-}"
 HERMES_ENV="${HERMES_ENV:-$HOME/.hermes/.env}"
 STRATA_KEY_FILE="${STRATA_KEY_FILE:-$HOME/.strata/api_key}"
 OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"
@@ -58,6 +68,10 @@ if good:
 PY
 }
 
+if [ -z "$STRATA_DIR" ]; then
+  STRATA_DIR="$(_load_env_file_key "$HERMES_ENV" "STRATA_DIR" || true)"
+fi
+
 RESOLVED=""
 SOURCE=""
 
@@ -98,6 +112,18 @@ else
   echo "[STRATA-WRAP] key from ${SOURCE} (len=${#RESOLVED}, prefix=${RESOLVED:0:6}…)" >&2
 fi
 
+if [ -z "${STRATA_PALACE:-}" ]; then
+  _palace_from_file="$(_load_env_file_key "$HERMES_ENV" "STRATA_PALACE" || true)"
+  if [ -n "$_palace_from_file" ]; then
+    STRATA_PALACE="$_palace_from_file"
+  fi
+fi
 export STRATA_PALACE="${STRATA_PALACE:-$HOME/.strata/palace}"
+
+if [ -z "$STRATA_DIR" ] || [ ! -d "$STRATA_DIR" ]; then
+  echo "[STRATA-WRAP] ERROR: set STRATA_DIR to your strata-memory clone (environment or $HERMES_ENV)." >&2
+  exit 1
+fi
+
 cd "$STRATA_DIR"
 exec uv run strata-memory-mcp "$@"

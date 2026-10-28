@@ -29,7 +29,7 @@ Please do NOT open a public issue for security vulnerabilities.
 - **Parameterized SQL**: all queries bound; LIMIT clamped
 - **Path sandbox**: legacy Markdown paths still resolve inside palace
 - **Audit + trajectory**: every tool call logged for post-incident review
-- **Air-gapped ready**: embedding can be cloud or self-hosted; SoT never requires network
+- **Local SoT, cloud embeddings**: SQLite never leaves the machine. The only implemented embedding provider is SiliconFlow (`BAAI/bge-m3` at `https://api.siliconflow.cn/v1`); memory text and recall queries are sent there. `local_onnx` / `self_hosted` appear in config comments and are not implemented
 
 ## Zero-trust defaults
 
