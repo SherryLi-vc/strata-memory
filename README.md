@@ -49,9 +49,22 @@ export STRATA_PALACE="${STRATA_PALACE:-$HOME/.strata/palace}"
 uv run strata-memory-mcp
 ```
 
-在你自己的 shell 配置里设置完整的 SiliconFlow API key（`STRATA_API_KEY`）。不要把 key 贴进对话、写进仓库，或写成带 `...` 的脱敏占位符。解析顺序：`STRATA_API_KEY` → `SILICONFLOW_API_KEY` → `OPENAI_API_KEY`。
+在你自己的 shell 配置里设置嵌入密钥（`STRATA_EMBEDDING_API_KEY` 或 `STRATA_API_KEY`）。不要把 key 贴进对话、写进仓库，或写成带 `...` 的脱敏占位符。云端密钥解析顺序：显式参数 → `STRATA_EMBEDDING_API_KEY` → `STRATA_API_KEY` → 对应提供方的 `SILICONFLOW_API_KEY` 或 `OPENAI_API_KEY`。
 
-**网络：** 当前唯一实现的嵌入提供方是 SiliconFlow（模型 `BAAI/bge-m3`，端点 `https://api.siliconflow.cn/v1`）。写入记忆和召回查询会把文本发到该 API 做向量。SQLite 真相源留在本机 `STRATA_PALACE`（默认 `~/.strata/palace`）。
+**嵌入（可配置，默认 SiliconFlow）：**
+
+| 变量 | 作用 | 默认 |
+|------|------|------|
+| `STRATA_EMBEDDING_PROVIDER` | `siliconflow`、`openai`、`openai_compatible`、`local` | `siliconflow` |
+| `STRATA_EMBEDDING_BASE_URL` | OpenAI 兼容 `POST /embeddings` 根地址 | SiliconFlow 为 `https://api.siliconflow.cn/v1` |
+| `STRATA_EMBEDDING_MODEL` | 模型 id | SiliconFlow 为 `BAAI/bge-m3` |
+| `STRATA_EMBEDDING_DIMENSION` | 入库向量维度 | `384`（bge-m3 截断；OpenAI `text-embedding-3-small` 为 1536） |
+
+- **SiliconFlow** 是默认选项，不是唯一选项。模型 `BAAI/bge-m3` 返回 1024 维，客户端保留前 `STRATA_EMBEDDING_DIMENSION` 维。
+- **任意 OpenAI 兼容端点**（OpenAI、自建网关、Ollama、llama.cpp、TEI、vLLM）：`STRATA_EMBEDDING_PROVIDER=openai_compatible`，并设置 `STRATA_EMBEDDING_BASE_URL` 和 `STRATA_EMBEDDING_MODEL`。向量长度必须等于 `STRATA_EMBEDDING_DIMENSION`，否则请改维度后 `strata_rebuild_index(confirm=true)`。本机回环地址（`localhost` / `127.0.0.1`）不要求 API key。
+- **本机进程内模型：** `STRATA_EMBEDDING_PROVIDER=local`，然后 `uv sync --extra local`。默认模型 `sentence-transformers/all-MiniLM-L6-v2`（384 维）。文本不会发到嵌入 API。
+
+**网络：** 只要提供方不是 `local`，配置的嵌入端点就会收到记忆正文和召回查询。SQLite 真相源留在本机 `STRATA_PALACE`（默认 `~/.strata/palace`）。换模型或维度后需要重建向量索引。
 
 ### 宿主配置
 
@@ -168,8 +181,7 @@ uv run python -m strata_memory.cli migrate --palace ~/.strata/palace
 # 写入 SQLite
 uv run python -m strata_memory.cli migrate --palace ~/.strata/palace --apply
 
-# 写入 + 重建向量索引
-export STRATA_API_KEY=sk-...
+# 写入 + 重建向量索引（密钥已在环境中，不要写进命令）
 uv run strata-memory-migrate --palace ~/.strata/palace --apply --rebuild-vectors
 ```
 
@@ -177,8 +189,8 @@ uv run strata-memory-migrate --palace ~/.strata/palace --apply --rebuild-vectors
 
 ## 安全
 
-- 记忆存在本地 `STRATA_PALACE`。嵌入请求发往 SiliconFlow（`https://api.siliconflow.cn/v1`）；不要把这一步当成离线
-- 密钥只走环境变量 `STRATA_API_KEY`，不写入 `config.json`，也不要贴进对话
+- 记忆存在本地 `STRATA_PALACE`。非 `local` 提供方会把记忆正文和召回查询发到配置的嵌入端点（默认 SiliconFlow `https://api.siliconflow.cn/v1`）
+- 密钥只走环境变量（`STRATA_EMBEDDING_API_KEY` / `STRATA_API_KEY`），不写入 `config.json`，也不要贴进对话
 - 写操作无裸 CRUD；破坏性重建必须 `confirm=true`
 - 跨 `user_id` / `tenant_id` 的 expand 硬失败
 

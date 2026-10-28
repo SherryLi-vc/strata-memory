@@ -72,10 +72,27 @@ if [ -z "$STRATA_DIR" ]; then
   STRATA_DIR="$(_load_env_file_key "$HERMES_ENV" "STRATA_DIR" || true)"
 fi
 
+# Non-secret embedding settings. The Python server also reads these from the environment.
+for _embed_name in \
+  STRATA_EMBEDDING_PROVIDER \
+  STRATA_EMBEDDING_BASE_URL \
+  STRATA_EMBEDDING_MODEL \
+  STRATA_EMBEDDING_DIMENSION \
+  STRATA_EMBEDDING_TRUNCATE \
+  STRATA_EMBEDDING_ALLOW_EMPTY_KEY
+do
+  if [ -z "${!_embed_name:-}" ]; then
+    _embed_val="$(_load_env_file_key "$HERMES_ENV" "$_embed_name" || true)"
+    if [ -n "$_embed_val" ]; then
+      export "${_embed_name}=${_embed_val}"
+    fi
+  fi
+done
+
 RESOLVED=""
 SOURCE=""
 
-for cand_name in STRATA_API_KEY SILICONFLOW_API_KEY; do
+for cand_name in STRATA_EMBEDDING_API_KEY STRATA_API_KEY SILICONFLOW_API_KEY OPENAI_API_KEY; do
   cand_val="${!cand_name:-}"
   if _key_usable "$cand_val"; then
     RESOLVED="$cand_val"; SOURCE="env:$cand_name"; break
@@ -83,7 +100,7 @@ for cand_name in STRATA_API_KEY SILICONFLOW_API_KEY; do
 done
 
 if [ -z "$RESOLVED" ]; then
-  for name in STRATA_API_KEY SILICONFLOW_API_KEY; do
+  for name in STRATA_EMBEDDING_API_KEY STRATA_API_KEY SILICONFLOW_API_KEY OPENAI_API_KEY; do
     cand="$(_load_env_file_key "$HERMES_ENV" "$name" || true)"
     if _key_usable "$cand"; then
       RESOLVED="$cand"; SOURCE="file:$HERMES_ENV:$name"; break
@@ -106,7 +123,14 @@ if [ -z "$RESOLVED" ]; then
 fi
 
 if [ -z "$RESOLVED" ]; then
-  echo "[STRATA-WRAP] ERROR: no usable API key. Add STRATA_API_KEY to ~/.hermes/.env" >&2
+  _provider="${STRATA_EMBEDDING_PROVIDER:-}"
+  _base="${STRATA_EMBEDDING_BASE_URL:-}"
+  if [ "$_provider" = "local" ] || [ "$_provider" = "local_onnx" ] \
+    || [[ "$_base" == *localhost* || "$_base" == *127.0.0.1* || "$_base" == *"[::1]"* ]]; then
+    echo "[STRATA-WRAP] no API key (not required for provider=${_provider:-openai_compatible} base=${_base:-local})" >&2
+  else
+    echo "[STRATA-WRAP] ERROR: no usable API key. Add STRATA_API_KEY or STRATA_EMBEDDING_API_KEY to ~/.hermes/.env" >&2
+  fi
 else
   export STRATA_API_KEY="$RESOLVED"
   echo "[STRATA-WRAP] key from ${SOURCE} (len=${#RESOLVED}, prefix=${RESOLVED:0:6}…)" >&2

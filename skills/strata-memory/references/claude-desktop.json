@@ -10,7 +10,10 @@
       ],
       "env": {
         "STRATA_API_KEY": "",
-        "STRATA_PALACE": "/absolute/path/to/palace"
+        "STRATA_PALACE": "/absolute/path/to/palace",
+        "STRATA_EMBEDDING_PROVIDER": "siliconflow",
+        "STRATA_EMBEDDING_BASE_URL": "https://api.siliconflow.cn/v1",
+        "STRATA_EMBEDDING_MODEL": "BAAI/bge-m3"
       }
     }
   }

@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from ..config import Config, api_key_status, is_initialized, is_usable_api_key, resolve_api_key
+from ..config import (
+    Config,
+    api_key_status,
+    embedding_requires_api_key,
+    is_initialized,
+    is_usable_api_key,
+    resolve_embedding_settings,
+)
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
 
@@ -32,29 +39,45 @@ def strata_doctor(
             "message": "config.json missing — run strata_init first.",
         })
 
-    # API key health (never print full key)
-    resolved = resolve_api_key(config.embedding.api_key or "")
+    # API key health (never print full key). Env can switch provider and endpoint.
+    embedding = resolve_embedding_settings(config.embedding)
+    config.embedding = embedding
+    resolved = embedding.api_key or ""
+    requires_key = embedding_requires_api_key(embedding.provider, embedding.base_url)
     key_stat = api_key_status(resolved)
+    if not requires_key and not is_usable_api_key(resolved):
+        key_stat = {
+            "configured": bool(resolved),
+            "usable": True,
+            "length": len(resolved),
+            "reason": "not_required",
+            "prefix": key_stat.get("prefix") or "",
+        }
     checks.append({
         "name": "embedding_api_key",
-        "ok": is_usable_api_key(resolved),
+        "ok": bool(key_stat.get("usable")),
         "detail": {
             **key_stat,
-            "provider": config.embedding.provider,
-            "model": config.embedding.model,
+            "provider": embedding.provider,
+            "model": embedding.model,
+            "base_url": embedding.base_url,
+            "dimension": embedding.dimension,
+            "key_required": requires_key,
             "env_STRATA_API_KEY_set": bool(__import__("os").environ.get("STRATA_API_KEY")),
             "env_SILICONFLOW_API_KEY_set": bool(__import__("os").environ.get("SILICONFLOW_API_KEY")),
+            "env_OPENAI_API_KEY_set": bool(__import__("os").environ.get("OPENAI_API_KEY")),
         },
     })
-    if config.embedding.provider == "siliconflow" and not is_usable_api_key(resolved):
+    if requires_key and not is_usable_api_key(resolved):
         issues.append({
             "severity": "error",
             "code": "EMBEDDING_API_KEY_MISSING",
             "message": (
-                f"No usable API key for siliconflow (reason={key_stat.get('reason')}, "
-                f"length={key_stat.get('length', 0)}). "
-                "Set full STRATA_API_KEY in Hermes MCP env / ~/.hermes/.env; "
-                "do not use OpenClaw redacted keys containing '...'."
+                f"No usable API key for {embedding.provider} "
+                f"(reason={key_stat.get('reason')}, length={key_stat.get('length', 0)}, "
+                f"base_url={embedding.base_url}). "
+                "Set STRATA_EMBEDDING_API_KEY or STRATA_API_KEY. "
+                "Do not use redacted keys containing '...'."
             ),
         })
 
@@ -162,9 +185,10 @@ def strata_doctor(
     rec = "All clear."
     if any(i.get("code") == "EMBEDDING_API_KEY_MISSING" for i in issues):
         rec = (
-            "Fix embedding key first: export full STRATA_API_KEY, update "
-            "~/.hermes/scripts/strata-wrapper.sh (or ~/.hermes/.env), restart Hermes MCP, "
-            "then re-run strata_doctor."
+            "Fix the embedding key first: set STRATA_EMBEDDING_API_KEY or STRATA_API_KEY "
+            "(SiliconFlow: SILICONFLOW_API_KEY, OpenAI-compatible: OPENAI_API_KEY). "
+            "Or set STRATA_EMBEDDING_PROVIDER=local, or a loopback STRATA_EMBEDDING_BASE_URL. "
+            "Then re-run strata_doctor."
         )
     elif issues:
         rec = "Address issues above; prefer strata_rebuild_index for index drift."

@@ -38,7 +38,7 @@ strata_memory/
 │   ├── rebuild.py
 │   ├── stats.py
 │   └── projection.py
-├── embedding/                # BGE-M3 providers
+├── embedding/                # SiliconFlow, OpenAI-compatible, local in-process
 ├── safety/                   # legacy CBT helpers
 ├── audit/                    # Markdown audit wrapper
 └── tools/                    # legacy onboarding helpers

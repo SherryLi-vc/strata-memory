@@ -22,6 +22,16 @@ Initialize palace, SQLite SoT, config.
 { "mode": "personal", "api_key": "optional-if-STRATA_API_KEY-set" }
 ```
 
+Embedding provider, model, base URL, and dimension come from the environment when the tool arguments are omitted:
+
+- `STRATA_EMBEDDING_PROVIDER` — `siliconflow` (default), `openai`, `openai_compatible`, or `local`
+- `STRATA_EMBEDDING_BASE_URL` — OpenAI-compatible embeddings root. SiliconFlow default `https://api.siliconflow.cn/v1`
+- `STRATA_EMBEDDING_MODEL` — SiliconFlow default `BAAI/bge-m3`; local default `sentence-transformers/all-MiniLM-L6-v2`
+- `STRATA_EMBEDDING_DIMENSION` — default `384` (bge-m3 is truncated to this). OpenAI `text-embedding-3-small` defaults to `1536` when that provider is selected
+- `STRATA_EMBEDDING_API_KEY` or `STRATA_API_KEY` — required for non-loopback HTTP providers
+
+`local` runs in-process (`uv sync --extra local`) and does not send text to an embedding API. Every other provider sends memory text and recall queries to the configured endpoint. A loopback `STRATA_EMBEDDING_BASE_URL` does not require a key.
+
 Company:
 
 ```json

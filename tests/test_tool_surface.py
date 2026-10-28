@@ -50,6 +50,8 @@ def test_skill_package_is_agensi_shaped():
     assert meta["docs_url"] == "https://github.com/SherryLi-vc/strata-memory"
     assert meta["version"] == "1.0.0"
     assert "https://api.siliconflow.cn" in text
+    assert "The configured embedding endpoint receives memory text" in text
+    assert "only implemented embedding provider is SiliconFlow" not in text
     assert "uvx strata-memory-mcp" not in text
     assert "github.com/vincy/" not in text
     for tool in EXPECTED_TOOLS:

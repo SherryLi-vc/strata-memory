@@ -37,6 +37,9 @@ enterprise = [
     "psycopg2-binary>=2.9",
     "sqlalchemy>=2.0",
 ]
+local = [
+    "fastembed>=0.4.0",
+]
 
 [project.scripts]
 strata-memory-mcp = "strata_memory.__main__:main"

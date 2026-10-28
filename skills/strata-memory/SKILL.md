@@ -12,7 +12,7 @@ use_cases:
   - Recall relevant memories as short cards, then expand only the ones that matter
 docs_url: https://github.com/SherryLi-vc/strata-memory
 license: MIT
-compatibility: Requires an MCP host (Claude Code, Cursor, Claude Desktop, or Hermes), Python 3.11+, uv, git, and a SiliconFlow API key for BAAI/bge-m3 embeddings in STRATA_API_KEY. Memories stay under STRATA_PALACE (default ~/.strata/palace). Embedding calls send text to https://api.siliconflow.cn/v1.
+compatibility: Requires an MCP host (Claude Code, Cursor, Claude Desktop, or Hermes), Python 3.11+, uv, and git. Embeddings default to SiliconFlow (BAAI/bge-m3) via STRATA_API_KEY. Set STRATA_EMBEDDING_PROVIDER, STRATA_EMBEDDING_BASE_URL, and STRATA_EMBEDDING_MODEL for a local model or any OpenAI-compatible endpoint. Memories stay under STRATA_PALACE. The configured embedding endpoint receives memory text and recall queries unless the provider is local.
 metadata:
   author: Vincy Zhang
   open_source: https://github.com/SherryLi-vc/strata-memory
@@ -55,8 +55,12 @@ This skill does not bundle the server. Install it from that repository. The `str
 Tell the user this before the first write or recall:
 
 - Rows live under `STRATA_PALACE` (default `~/.strata/palace`).
-- The only implemented embedding provider is SiliconFlow: model `BAAI/bge-m3`, endpoint `https://api.siliconflow.cn/v1`. `commit_memory`, `promote_session`, `recall_context`, and index rebuild send memory text or the query to that API. Config comments mention `local_onnx` and `self_hosted`; those providers are not implemented.
-- Key lookup order is `STRATA_API_KEY`, then `SILICONFLOW_API_KEY`, then `OPENAI_API_KEY`. Empty values, values shorter than 20 characters, and values containing `...` are rejected.
+- The configured embedding endpoint receives memory text and recall queries (`commit_memory`, `promote_session`, `recall_context`, and index rebuild), unless the provider is `local`.
+- Default option is SiliconFlow: provider `siliconflow`, model `BAAI/bge-m3`, base URL `https://api.siliconflow.cn/v1`. That model returns 1024 dimensions and is truncated to `STRATA_EMBEDDING_DIMENSION` (default 384).
+- `STRATA_EMBEDDING_PROVIDER=openai` or `openai_compatible` calls any OpenAI-compatible `POST /embeddings` endpoint. Set `STRATA_EMBEDDING_BASE_URL` and `STRATA_EMBEDDING_MODEL`. The vector length must equal `STRATA_EMBEDDING_DIMENSION` (OpenAI `text-embedding-3-small` uses 1536 when that provider is selected). Then rebuild the index.
+- `STRATA_EMBEDDING_PROVIDER=local` runs an in-process model (default `sentence-transformers/all-MiniLM-L6-v2`, 384 dimensions). Install with `uv sync --extra local`. Text stays on the machine.
+- A local server (Ollama, llama.cpp, TEI, vLLM) is `openai_compatible` with a loopback `STRATA_EMBEDDING_BASE_URL` such as `http://127.0.0.1:11434/v1`. Loopback does not require an API key. Text is sent to that URL.
+- Key lookup for HTTP providers: explicit argument, `STRATA_EMBEDDING_API_KEY`, `STRATA_API_KEY`, then `SILICONFLOW_API_KEY` (SiliconFlow) or `OPENAI_API_KEY` (OpenAI-compatible). Empty values, values shorter than 20 characters, and values containing `...` are rejected.
 - Never ask the user to paste a key into chat. Never echo a key, write one into memory, or commit one. The user sets it in their own shell profile or host config.
 
 ## Install this skill
@@ -77,7 +81,7 @@ To pack this folder for Agensi, zip `skills/strata-memory` so the archive root c
 ## Setup
 
 1. Confirm Python 3.11+, `uv`, and `git`. If one is missing, point the user at that tool's install page and stop.
-2. Ask the user to set `STRATA_API_KEY` themselves (shell profile, `~/.strata/env`, Claude Desktop's local config, or `~/.hermes/.env`). Do not request the value and do not repeat it.
+2. Ask the user to set `STRATA_API_KEY` or `STRATA_EMBEDDING_API_KEY` themselves when the endpoint requires a key (shell profile, `~/.strata/env`, Claude Desktop's local config, or `~/.hermes/.env`). Do not request the value and do not repeat it. For `local`, or a loopback `STRATA_EMBEDDING_BASE_URL`, skip the key. To leave SiliconFlow, they set `STRATA_EMBEDDING_PROVIDER`, `STRATA_EMBEDDING_BASE_URL`, and `STRATA_EMBEDDING_MODEL` in that same place.
 3. Clone and install:
 
 ```bash
