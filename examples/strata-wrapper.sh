@@ -6,9 +6,10 @@
 #   chmod +x ~/.hermes/scripts/strata-wrapper.sh
 #
 # Set these yourself (environment or ~/.hermes/.env). Do not paste keys into chat.
-#   STRATA_API_KEY=<full SiliconFlow key>
 #   STRATA_DIR=/absolute/path/to/strata-memory
 # Optional: STRATA_PALACE=~/.strata/palace
+# Embedding defaults to local (no API key). Set STRATA_EMBEDDING_PROVIDER
+# and STRATA_API_KEY only when you want a cloud endpoint.
 #
 # Key order: STRATA_API_KEY, SILICONFLOW_API_KEY (env, then ~/.hermes/.env),
 # then ~/.strata/api_key, then a non-redacted sk- token in ~/.openclaw/openclaw.json.
@@ -88,6 +89,9 @@ do
     fi
   fi
 done
+
+# Offline by default. An explicit provider in the environment or ~/.hermes/.env wins.
+export STRATA_EMBEDDING_PROVIDER="${STRATA_EMBEDDING_PROVIDER:-local}"
 
 RESOLVED=""
 SOURCE=""

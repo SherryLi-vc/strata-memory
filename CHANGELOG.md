@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.2.0] — 2026-10-28
+
+### Recall
+- L0 (`factual_truth`, `user_preference`, `procedure_rule`) is ranked by query relevance. Scores are no longer hardcoded to 1.0.
+- `limit` applies to the merged list (L0, scratch, and other layers).
+- `include_l0` is exposed on `recall_context` (default true). `current_turn_only` still skips L0.
+- Only returned cards are touched, so a recall no longer rewrites `last_accessed` on every L0 row.
+
+### Forget and export
+- `forget_memory`: delete by id, or by filter with `confirm=true`. Scoped to `user_id` and `tenant_id`. Deletes the SQLite row (FTS trigger included) and the Chroma id, so `strata_rebuild_index` cannot restore it.
+- `export_memories` and `strata-memory export` write a JSON document for one user/tenant.
+
+### Install
+- Project name is `strata-memory`. `uvx strata-memory` starts the MCP server. `strata-memory-mcp` remains.
+- Default embedding provider is `local` (no API key). Without the `local` extra, embeddings are an offline hashing fallback. `config.json` values already saved for another provider are left alone.
+- `strata-memory setup --host cursor|claude-code|claude-desktop` prints a snippet.
+
+### Breaking
+- Fresh installs no longer default to SiliconFlow. Set `STRATA_EMBEDDING_PROVIDER=siliconflow` to keep that endpoint.
+- Callers that depended on every L0 card being prepended, ignoring `limit`, will now receive at most `limit` cards.
+
 ## [2.1.0] — 2026-08-10
 
 ### Memory 3.0 Slice C (engineering maturity)

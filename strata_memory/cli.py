@@ -1,6 +1,9 @@
-"""CLI for Strata Memory 2.0.
+"""CLI for Strata Memory.
 
 Usage:
+    strata-memory                       # MCP server (uvx strata-memory)
+    strata-memory setup --host cursor
+    strata-memory export --user USER [--out FILE]
     python -m strata_memory.cli init
     python -m strata_memory.cli doctor
     python -m strata_memory.cli stats
@@ -17,6 +20,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 
 def cmd_init() -> None:
@@ -130,10 +134,63 @@ def cmd_serve() -> None:
     asyncio.run(run())
 
 
+def _flag(name: str, default: str = "") -> str:
+    if name not in sys.argv:
+        return default
+    idx = sys.argv.index(name)
+    if idx + 1 >= len(sys.argv):
+        return default
+    return sys.argv[idx + 1]
+
+
+def cmd_setup() -> None:
+    from .ops.setup_host import HostName, render_setup
+
+    host = _flag("--host", "cursor")
+    allowed: tuple[HostName, ...] = ("cursor", "claude-code", "claude-desktop")
+    if host not in allowed:
+        print("Usage: strata-memory setup --host cursor|claude-code|claude-desktop", file=sys.stderr)
+        sys.exit(2)
+    print(render_setup(cast(HostName, host)), end="")
+
+
+def cmd_export() -> None:
+    from .config import load_config, truth_db_path
+    from .pipeline.export_json import export_memories
+    from .storage.truth_store import TruthStore
+
+    user_id = _flag("--user")
+    if not user_id:
+        print("Usage: strata-memory export --user USER_ID [--out FILE] [--tenant ID] [--session ID]", file=sys.stderr)
+        sys.exit(2)
+    cfg = load_config()
+    store = TruthStore(truth_db_path(Path(cfg.palace_path)))
+    limit_raw = _flag("--limit", "500")
+    payload = export_memories(
+        store=store,
+        user_id=user_id,
+        tenant_id=_flag("--tenant", cfg.tenant_id or ""),
+        session_id=_flag("--session", ""),
+        include_archived="--include-archived" in sys.argv,
+        limit=int(limit_raw or "500"),
+    )
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    out = _flag("--out")
+    if out:
+        Path(out).write_text(text + "\n", encoding="utf-8")
+        print(json.dumps({"status": "ok", "path": out, "count": payload.get("count", 0)}))
+    else:
+        print(text)
+
+
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: python -m strata_memory.cli {init|doctor|stats|digest|project|migrate|serve}")
-        sys.exit(1)
+    if len(sys.argv) < 2 or sys.argv[1] in {"help", "--help", "-h"}:
+        print(
+            "Usage: strata-memory {setup|export|init|doctor|stats|digest|project|migrate|serve}\n"
+            "       strata-memory            # start the MCP server\n"
+            "       strata-memory-mcp        # start the MCP server"
+        )
+        sys.exit(0 if len(sys.argv) > 1 else 1)
     cmd = sys.argv[1]
     handlers = {
         "init": cmd_init,
@@ -143,10 +200,12 @@ def main() -> None:
         "project": cmd_project,
         "migrate": cmd_migrate,
         "serve": cmd_serve,
+        "setup": cmd_setup,
+        "export": cmd_export,
     }
     if cmd not in handlers:
         print(f"Unknown command: {cmd}")
-        print("Usage: python -m strata_memory.cli {init|doctor|stats|digest|project|migrate|serve}")
+        print("Usage: strata-memory {setup|export|init|doctor|stats|digest|project|migrate|serve}")
         sys.exit(1)
     handlers[cmd]()
 

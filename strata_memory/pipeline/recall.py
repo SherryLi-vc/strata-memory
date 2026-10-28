@@ -1,4 +1,10 @@
-"""Progressive Recall Funnel (2.0 + 3.0 multi-signal rerank)."""
+"""Progressive Recall Funnel (2.0 + 3.0 multi-signal rerank).
+
+L0 used to be prepended with a hardcoded score of 1.0, ahead of the ranked
+list, so ``limit`` only trimmed hybrid hits. Every active row now competes
+on query relevance. ``limit`` is applied to that single list. ``include_l0``
+drops the L0 layer from the candidate pool when false.
+"""
 
 from __future__ import annotations
 
@@ -7,25 +13,24 @@ from typing import Any, Optional
 from ..config import Config
 from ..embedding import EmbeddingProvider
 from ..governance import CBTMiddleware, ToolError, success_payload
+from ..pipeline.lexical import fts_or_query, lexical_scores, squash_lexical
 from ..pipeline.scoring_signals import multi_signal_score
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
 
-
-def _rrf_fuse(
-    ranked_lists: list[list[str]],
-    *,
-    k: int = 60,
-) -> list[tuple[str, float]]:
-    scores: dict[str, float] = {}
-    for lst in ranked_lists:
-        for rank, doc_id in enumerate(lst):
-            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank + 1)
-    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+_CANDIDATE_LIMIT = 300
+_RELEVANCE_FLOOR = 0.05
 
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3)
+
+
+def _card_summary(row: dict[str, Any], cbt: CBTMiddleware, config: Config) -> str:
+    summary = row.get("summary") or (row.get("fact_claim") or "")[:240]
+    if row.get("is_negative_schema") and config.cbt.enabled and config.cbt.mode == "passive":
+        summary = cbt.defusion_frame(summary)
+    return summary[:400]
 
 
 async def recall_context(
@@ -58,175 +63,121 @@ async def recall_context(
 
     tenant_id = tenant_id or config.tenant_id or ""
     limit = max(1, min(int(limit), 20))
+    shallow = context_depth == "shallow"
     cbt = CBTMiddleware(
         enabled=config.cbt.enabled,
         cooling_hours=config.cbt.cooling_hours,
     )
     filter_log: list[dict[str, str]] = []
 
-    # ── L0 ──
-    l0_cards: list[dict[str, Any]] = []
-    if include_l0 and not current_turn_only:
-        l0_rows = store.list_active(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            layers=["L0"],
-            include_scratch=False,
-            exclude_negative=True,
-            limit=12,
-        )
-        budget = config.l0_token_budget
-        used = 0
-        for r in l0_rows:
-            card = {
-                "id": r["id"],
-                "summary": r.get("summary") or r["fact_claim"][:240],
-                "memory_type": r["memory_type"],
-                "layer": "L0",
-                "score": 1.0,
-                "score_breakdown": {
-                    "recency": 1.0,
-                    "relevance": 1.0,
-                    "importance": float(r.get("importance") or 0.7),
-                    "usage_boost": 0.0,
-                    "freshness": 1.0,
-                    "rrf_raw": 1.0,
-                    "final": 1.0,
-                    "why": "L0 core profile",
-                },
-                "entity": r.get("entity") or None,
-            }
-            cost = _estimate_tokens(card["summary"])
-            if used + cost > budget:
-                filter_log.append({"id": r["id"], "reason": "l0_token_budget"})
-                break
-            l0_cards.append(card)
-            used += cost
-            store.touch(r["id"])
+    rows = store.list_active(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        include_scratch=bool(session_id),
+        limit=_CANDIDATE_LIMIT,
+    )
+    by_id: dict[str, dict[str, Any]] = {row["id"]: row for row in rows}
 
-    # ── Scratch (this session) ──
-    scratch_cards: list[dict[str, Any]] = []
-    if session_id:
-        scratch_rows = store.list_active(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            session_id=session_id,
-            layers=["scratch"],
-            include_scratch=True,
-            limit=5,
-        )
-        for r in scratch_rows:
-            if r.get("session_id") != session_id:
-                filter_log.append({"id": r["id"], "reason": "scratch_other_session"})
-                continue
-            scratch_cards.append(
-                {
-                    "id": r["id"],
-                    "summary": r.get("summary") or r["fact_claim"][:240],
-                    "memory_type": r["memory_type"],
-                    "layer": "scratch",
-                    "score": 0.55,
-                    "score_breakdown": {
-                        "recency": 1.0,
-                        "relevance": 0.5,
-                        "importance": float(r.get("importance") or 0.5),
-                        "usage_boost": 0.0,
-                        "freshness": 1.0,
-                        "rrf_raw": 0.0,
-                        "final": 0.55,
-                        "why": "current session scratch",
-                    },
-                    "entity": r.get("entity") or None,
-                }
-            )
-
-    if context_depth == "shallow":
-        all_cards = l0_cards + scratch_cards
-        token_est = sum(_estimate_tokens(c["summary"]) for c in all_cards)
-        return success_payload(
-            {
-                "query": query,
-                "hits": all_cards,
-                "hit_count": len(all_cards),
-                "token_estimate": token_est,
-                "mode": "shallow",
-                "filtered": filter_log[:20],
-                "note": "Summaries only. Call expand_memory_detail(id) for full text.",
-            },
-            message=f"Shallow recall: {len(all_cards)} cards.",
-        )
-
-    # ── Hybrid RRF ──
     vector_ids: list[str] = []
     fts_ids: list[str] = []
+    vector_sim: dict[str, float] = {}
 
-    if embed_provider and chroma:
-        try:
-            qvec = await embed_provider.embed(query)
-            where: dict[str, Any] = {"user_id": user_id}
-            if tenant_id:
-                where = {"$and": [{"user_id": user_id}, {"tenant_id": tenant_id}]}
-            vres = chroma.query(query_embedding=qvec, top_k=limit * 4, where=where)
-            vector_ids = [r["id"] for r in vres if r.get("id")]
-        except Exception:
-            vector_ids = []
+    if not shallow:
+        or_query = fts_or_query(query)
+        if or_query:
+            try:
+                fres = store.fts_search(
+                    query,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    limit=max(limit * 4, 20),
+                    fts_query=or_query,
+                )
+                for row in fres:
+                    fts_ids.append(row["id"])
+                    by_id.setdefault(row["id"], row)
+            except Exception:
+                fts_ids = []
 
-    try:
-        fres = store.fts_search(query, tenant_id=tenant_id, user_id=user_id, limit=limit * 4)
-        fts_ids = [r["id"] for r in fres]
-    except Exception:
-        fts_ids = []
+        if embed_provider and chroma:
+            try:
+                qvec = await embed_provider.embed(query)
+                where: dict[str, Any] = {"user_id": user_id}
+                if tenant_id:
+                    where = {"$and": [{"user_id": user_id}, {"tenant_id": tenant_id}]}
+                vres = chroma.query(query_embedding=qvec, top_k=limit * 4, where=where)
+                for hit in vres:
+                    mid = hit.get("id")
+                    if not mid:
+                        continue
+                    vector_ids.append(mid)
+                    distance = float(hit.get("distance") or 0.0)
+                    vector_sim[mid] = max(0.0, min(1.0, 1.0 - distance))
+                    if mid not in by_id:
+                        row = store.get_by_id(mid)
+                        if row:
+                            by_id[mid] = row
+            except Exception:
+                vector_ids = []
 
-    fused = _rrf_fuse([vector_ids, fts_ids])
-    if not fused:
-        fallback = store.list_active(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            layers=["L1", "L2"],
-            limit=limit * 2,
-        )
-        fused = [(r["id"], 0.1) for r in fallback]
-
-    max_rrf = max((s for _, s in fused), default=1.0) or 1.0
-    ranked: list[tuple[float, dict[str, Any], dict[str, float]]] = []
-    seen = {c["id"] for c in l0_cards}
-
-    for mid, rrf_s in fused:
-        if mid in seen:
+    candidates: list[dict[str, Any]] = []
+    for row in by_id.values():
+        if row.get("status") != "active":
+            filter_log.append({"id": row["id"], "reason": "inactive_or_missing"})
             continue
-        row = store.get_by_id(mid)
-        if not row or row.get("status") != "active":
-            filter_log.append({"id": mid, "reason": "inactive_or_missing"})
+        if not include_l0 and row.get("layer") == "L0":
+            filter_log.append({"id": row["id"], "reason": "include_l0_false"})
             continue
-        # Scratch from other sessions blocked
+        if current_turn_only and row.get("layer") == "L0":
+            filter_log.append({"id": row["id"], "reason": "current_turn_skips_l0"})
+            continue
         if row.get("is_scratch") and row.get("session_id") != session_id:
-            filter_log.append({"id": mid, "reason": "scratch_other_session"})
+            filter_log.append({"id": row["id"], "reason": "scratch_other_session"})
             continue
-        # current_turn_only: prefer this session durable + scratch (still allow L0 above)
         if current_turn_only and session_id:
             if row.get("session_id") and row.get("session_id") != session_id:
-                filter_log.append({"id": mid, "reason": "not_current_session"})
+                filter_log.append({"id": row["id"], "reason": "not_current_session"})
                 continue
-
+        if shallow and row.get("layer") not in {"L0", "scratch"}:
+            continue
         if row.get("is_negative_schema") and config.cbt.enabled and config.cbt.mode == "active":
-            filter_log.append({"id": mid, "reason": "cbt_active_hidden"})
+            filter_log.append({"id": row["id"], "reason": "cbt_active_hidden"})
+            continue
+        candidates.append(row)
+
+    lexical = lexical_scores(
+        query,
+        [(row["id"], f"{row.get('fact_claim') or ''} {row.get('summary') or ''}") for row in candidates],
+    )
+
+    ranked: list[tuple[float, dict[str, Any]]] = []
+    for row in candidates:
+        raw_lex = float(lexical.get(row["id"], 0.0))
+        lex_norm = squash_lexical(raw_lex)
+        vsim = vector_sim.get(row["id"])
+        if lex_norm > 0 and vsim is not None:
+            relevance = 0.75 * lex_norm + 0.25 * vsim
+        elif lex_norm > 0:
+            relevance = lex_norm
+        elif vsim is not None:
+            relevance = 0.25 * vsim
+        else:
+            relevance = 0.0
+        if relevance < _RELEVANCE_FLOOR:
+            filter_log.append({"id": row["id"], "reason": "below_relevance"})
             continue
 
-        final, breakdown = multi_signal_score(row, rrf_score=rrf_s, max_rrf=max_rrf)
-        # Session boost for same session durable
-        if session_id and row.get("session_id") == session_id:
+        final, breakdown = multi_signal_score(row, rrf_score=raw_lex, relevance=relevance)
+        if session_id and row.get("session_id") == session_id and not row.get("is_scratch"):
             final *= 1.15
             breakdown["session_boost"] = 1.15
-            breakdown["final"] = round(final, 4)
+        breakdown["lexical"] = round(raw_lex, 4)
         breakdown["why"] = _why_selected(breakdown, row)
-
-        summary = row.get("summary") or row["fact_claim"][:240]
-        if row.get("is_negative_schema") and config.cbt.enabled and config.cbt.mode == "passive":
-            summary = cbt.defusion_frame(summary)
-
+        breakdown["final"] = round(final, 4)
         card = {
-            "id": mid,
-            "summary": summary[:400],
+            "id": row["id"],
+            "summary": _card_summary(row, cbt, config),
             "memory_type": row["memory_type"],
             "layer": row["layer"],
             "score": round(final, 4),
@@ -235,28 +186,24 @@ async def recall_context(
             "entity": row.get("entity") or None,
             "supersedes_id": row.get("supersedes_id") or None,
         }
-        ranked.append((final, card, breakdown))
-        seen.add(mid)
+        ranked.append((final, card))
 
-    ranked.sort(key=lambda x: x[0], reverse=True)
-    hits = [c for _, c, _ in ranked[:limit]]
-    for _, c, _ in ranked[limit:]:
-        filter_log.append({"id": c["id"], "reason": "below_top_k"})
+    ranked.sort(key=lambda item: (-item[0], item[1]["id"]))
+    for _score, card in ranked[limit:]:
+        filter_log.append({"id": card["id"], "reason": "below_top_k"})
+    selected = [card for _score, card in ranked[:limit]]
 
-    for c in hits:
-        store.touch(c["id"])
-
-    all_cards = l0_cards + scratch_cards + hits
-    max_tokens = config.l0_token_budget + config.l2_token_budget
+    max_tokens = config.l0_token_budget if shallow else config.l0_token_budget + config.l2_token_budget
     trimmed: list[dict[str, Any]] = []
     used = 0
-    for c in all_cards:
-        cost = _estimate_tokens(c["summary"])
+    for card in selected:
+        cost = _estimate_tokens(card["summary"])
         if used + cost > max_tokens:
-            filter_log.append({"id": c["id"], "reason": "token_waterline"})
+            filter_log.append({"id": card["id"], "reason": "token_waterline"})
             continue
-        trimmed.append(c)
+        trimmed.append(card)
         used += cost
+        store.touch(card["id"])
 
     store.audit(
         "recall_context",
@@ -267,28 +214,35 @@ async def recall_context(
         summary=f"q={query[:80]} hits={len(trimmed)} tokens~{used}",
     )
 
-    return success_payload(
-        {
-            "query": query,
-            "hits": trimmed,
-            "hit_count": len(trimmed),
-            "token_estimate": used,
-            "mode": "deep",
-            "fusion": {
-                "vector_hits": len(vector_ids),
-                "fts_hits": len(fts_ids),
-                "rerank": "multi_signal_v3",
-            },
-            "filtered": filter_log[:30],
-            "note": (
-                "Progressive disclosure: id+summary+score+score_breakdown. Call expand_memory_detail for full detail."
-            ),
-        },
-        message=f"Recall funnel returned {len(trimmed)} cards (~{used} tokens).",
+    payload: dict[str, Any] = {
+        "query": query,
+        "hits": trimmed,
+        "hit_count": len(trimmed),
+        "token_estimate": used,
+        "mode": "shallow" if shallow else "deep",
+        "include_l0": bool(include_l0),
+        "filtered": filter_log[:30],
+        "note": (
+            "Summaries only. Call expand_memory_detail(id) for full text."
+            if shallow
+            else "Progressive disclosure: id+summary+score+score_breakdown. Call expand_memory_detail for full detail."
+        ),
+    }
+    if not shallow:
+        payload["fusion"] = {
+            "vector_hits": len(vector_ids),
+            "fts_hits": len(fts_ids),
+            "rerank": "lexical_bm25+multi_signal_v3",
+        }
+    message = (
+        f"Shallow recall: {len(trimmed)} cards."
+        if shallow
+        else f"Recall funnel returned {len(trimmed)} cards (~{used} tokens)."
     )
+    return success_payload(payload, message=message)
 
 
-def _why_selected(breakdown: dict[str, float], row: dict[str, Any]) -> str:
+def _why_selected(breakdown: dict[str, Any], row: dict[str, Any]) -> str:
     parts = []
     if breakdown.get("relevance", 0) >= 0.5:
         parts.append("high relevance")
@@ -298,7 +252,7 @@ def _why_selected(breakdown: dict[str, float], row: dict[str, Any]) -> str:
         parts.append("important")
     if breakdown.get("usage_boost", 0) >= 0.3:
         parts.append("frequently used")
-    if row.get("layer") == "L0":
+    if row.get("layer") == "L0" and breakdown.get("relevance", 0) >= 0.5:
         parts.append("core layer")
     if not parts:
         parts.append("matched query")

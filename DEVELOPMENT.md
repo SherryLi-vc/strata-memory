@@ -7,14 +7,14 @@ git clone https://github.com/SherryLi-vc/strata-memory.git
 cd strata-memory
 uv sync --extra dev
 uv run pytest -v
-uv run strata-memory-mcp
+uv run strata-memory
 ```
 
 ## Package layout
 
 ```
 strata_memory/
-├── server.py                 # MCP surface (11 tools)
+├── server.py                 # MCP surface (13 tools)
 ├── config.py                 # Config + palace paths + truth_db_path
 ├── governance/
 │   ├── quality_kernel.py     # Write-time validation / dedup hash / TTL

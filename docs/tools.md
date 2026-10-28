@@ -24,7 +24,7 @@ Initialize palace, SQLite SoT, config.
 
 Embedding provider, model, base URL, and dimension come from the environment when the tool arguments are omitted:
 
-- `STRATA_EMBEDDING_PROVIDER` — `siliconflow` (default), `openai`, `openai_compatible`, or `local`
+- `STRATA_EMBEDDING_PROVIDER` — `local` (default, no API key), `siliconflow`, `openai`, or `openai_compatible`
 - `STRATA_EMBEDDING_BASE_URL` — OpenAI-compatible embeddings root. SiliconFlow default `https://api.siliconflow.cn/v1`
 - `STRATA_EMBEDDING_MODEL` — SiliconFlow default `BAAI/bge-m3`; local default `sentence-transformers/all-MiniLM-L6-v2`
 - `STRATA_EMBEDDING_DIMENSION` — default `384` (bge-m3 is truncated to this). OpenAI `text-embedding-3-small` defaults to `1536` when that provider is selected
@@ -85,9 +85,12 @@ Common errors: `SECRET_DETECTED`, `FUZZY_TIME`, `SPECULATION_AS_TRUTH`, `CLAIM_T
   "user_id": "user_001",
   "query": "coding IDE preferences",
   "context_depth": "deep",
-  "limit": 8
+  "limit": 8,
+  "include_l0": true
 }
 ```
+
+`limit` caps the merged list. L0 is ranked with the other tiers. `include_l0: false` omits L0.
 
 Response shape:
 
@@ -100,7 +103,7 @@ Response shape:
       "summary": "User prefers dark mode...",
       "memory_type": "user_preference",
       "layer": "L0",
-      "score": 1.0
+      "score": 0.62
     }
   ],
   "token_estimate": 120,
@@ -181,6 +184,8 @@ Default `dry_run=true`. Set `dry_run=false` to archive expired rows. Do not past
 | promote_session | user_id, session_id | SoT + vector |
 | recall_context | user_id, query | Read + usage_count++ |
 | expand_memory_detail | user_id, memory_id | Read + usage_count++ |
+| forget_memory | user_id, and id or filter | Deletes SQLite + vector ids. Filter needs confirm=true |
+| export_memories | user_id | Read JSON |
 | strata_doctor | — | Read |
 | strata_rebuild_index | confirm=true | Wipes vectors only |
 | strata_stats | — | Read |

@@ -20,8 +20,10 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
-# Built-in defaults. SiliconFlow is the default option, not the only one.
-DEFAULT_EMBEDDING_PROVIDER = "siliconflow"
+# Built-in defaults. Local (offline, no API key) is the default.
+# SiliconFlow remains available by setting STRATA_EMBEDDING_PROVIDER=siliconflow.
+# A saved config.json that already names a provider is left as-is.
+DEFAULT_EMBEDDING_PROVIDER = "local"
 _PROVIDER_DEFAULTS: dict[str, dict[str, object]] = {
     "siliconflow": {
         "model": "BAAI/bge-m3",
@@ -73,11 +75,11 @@ CATEGORY_DECAY_RATES: dict[str, float] = {
 
 class EmbeddingConfig(BaseModel):
     provider: str = DEFAULT_EMBEDDING_PROVIDER
-    model: str = "BAAI/bge-m3"
+    model: str = "sentence-transformers/all-MiniLM-L6-v2"
     api_key: str = Field(default="", exclude=True)
-    base_url: str = "https://api.siliconflow.cn/v1"
+    base_url: str = ""
     dimension: int = 384
-    mode: str = "cloud"  # cloud | local
+    mode: str = "local"  # cloud | local
 
 
 class CBTConfig(BaseModel):
@@ -96,7 +98,7 @@ class AuditConfig(BaseModel):
 
 class Config(BaseModel):
     palace_path: str = ""
-    version: str = "2.1.0"
+    version: str = "2.2.0"
 
     mode: str = "personal"  # personal | company
     tenant_id: str = ""

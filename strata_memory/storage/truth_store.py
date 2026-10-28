@@ -553,13 +553,22 @@ class TruthStore:
         tenant_id: str = "",
         user_id: str,
         limit: int = 20,
+        fts_query: str = "",
     ) -> list[dict[str, Any]]:
-        """Full-text search via FTS5. Returns id + bm25 rank."""
-        # Escape FTS special chars lightly — quote each token
-        tokens = [t for t in query.replace('"', " ").split() if t]
-        if not tokens:
-            return []
-        fts_q = " ".join(f'"{t}"' for t in tokens[:12])
+        """Full-text search via FTS5. Returns id + bm25 rank.
+
+        The default query AND-s quoted tokens (near-duplicate search).
+        ``fts_query`` replaces that, so recall can pass an ``OR`` query and
+        still receive FTS5 ``bm25()`` ranks for the rows that match.
+        """
+        if fts_query.strip():
+            fts_q = fts_query.strip()
+        else:
+            # Escape FTS special chars lightly — quote each token
+            tokens = [t for t in query.replace('"', " ").split() if t]
+            if not tokens:
+                return []
+            fts_q = " ".join(f'"{t}"' for t in tokens[:12])
         safe_limit = max(1, min(int(limit), 100))
         sql = f"""
             SELECT m.*, bm25(memories_fts) AS fts_rank
@@ -654,6 +663,101 @@ class TruthStore:
             "schema_version": SCHEMA_VERSION,
             "db_schema_version": db_ver,
         }
+
+    def find_memories_for_forget(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        memory_id: str = "",
+        memory_type: str = "",
+        layer: str = "",
+        session_id: str = "",
+        query: str = "",
+        match_all: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Rows in this tenant/user scope that a forget call would delete."""
+        parts = ["SELECT * FROM memories WHERE user_id=? AND tenant_id=?"]
+        params: list[Any] = [user_id, tenant_id or ""]
+        if memory_id:
+            parts.append("AND id=?")
+            params.append(memory_id)
+        else:
+            if memory_type:
+                parts.append("AND memory_type=?")
+                params.append(memory_type)
+            if layer:
+                parts.append("AND layer=?")
+                params.append(layer)
+            if session_id:
+                parts.append("AND session_id=?")
+                params.append(session_id)
+            if query:
+                parts.append("AND instr(lower(fact_claim), ?) > 0")
+                params.append(query.lower())
+            if not any((memory_type, layer, session_id, query, match_all)):
+                return []
+        parts.append("ORDER BY created_at ASC LIMIT 2000")
+        with self._conn() as conn:
+            rows = conn.execute(" ".join(parts), params).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_memories(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        memory_id: str = "",
+        memory_type: str = "",
+        layer: str = "",
+        session_id: str = "",
+        query: str = "",
+        match_all: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Delete matching rows. The FTS delete trigger drops the index rows."""
+        matched = self.find_memories_for_forget(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            memory_id=memory_id,
+            memory_type=memory_type,
+            layer=layer,
+            session_id=session_id,
+            query=query,
+            match_all=match_all,
+        )
+        if not matched:
+            return []
+        ids = [row["id"] for row in matched]
+        with self._conn() as conn:
+            for mid in ids:
+                conn.execute(
+                    "DELETE FROM memories WHERE id=? AND user_id=? AND tenant_id=?",
+                    (mid, user_id, tenant_id or ""),
+                )
+        return matched
+
+    def list_for_export(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        session_id: str = "",
+        include_archived: bool = False,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Memories visible to this user and tenant, oldest first."""
+        parts = ["SELECT * FROM memories WHERE user_id=? AND tenant_id=?"]
+        params: list[Any] = [user_id, tenant_id or ""]
+        if session_id:
+            parts.append("AND session_id=?")
+            params.append(session_id)
+        if not include_archived:
+            parts.append("AND status='active' AND valid_to IS NULL")
+        safe = max(1, min(int(limit or 500), 10000))
+        parts.append(f"ORDER BY created_at ASC LIMIT {safe}")
+        with self._conn() as conn:
+            rows = conn.execute(" ".join(parts), params).fetchall()
+        return [dict(row) for row in rows]
 
     def candidates_for_digest(self, older_than_days: int = 30) -> list[dict[str, Any]]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).replace(microsecond=0).isoformat()

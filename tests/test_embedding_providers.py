@@ -38,12 +38,21 @@ def clean_embed_env(monkeypatch):
     return monkeypatch
 
 
-def test_defaults_are_siliconflow(clean_embed_env):
+def test_defaults_are_local(clean_embed_env):
+    settings = resolve_embedding_settings(EmbeddingConfig())
+    assert settings.provider == "local"
+    assert settings.model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert settings.base_url == ""
+    assert settings.dimension == 384
+    assert not embedding_requires_api_key(settings.provider, settings.base_url)
+
+
+def test_env_can_still_select_siliconflow(clean_embed_env):
+    clean_embed_env.setenv("STRATA_EMBEDDING_PROVIDER", "siliconflow")
     settings = resolve_embedding_settings(EmbeddingConfig())
     assert settings.provider == "siliconflow"
     assert settings.model == "BAAI/bge-m3"
     assert settings.base_url == "https://api.siliconflow.cn/v1"
-    assert settings.dimension == 384
     assert embedding_requires_api_key(settings.provider, settings.base_url)
 
 
@@ -198,7 +207,12 @@ def test_factory_routes_providers(clean_embed_env):
 
 
 @pytest.mark.asyncio
-async def test_local_without_extra_explains_how_to_install(clean_embed_env):
+async def test_local_without_extra_uses_hashing_embedder(clean_embed_env):
     provider = LocalEmbeddingProvider(model="sentence-transformers/all-MiniLM-L6-v2", dimension=384)
-    with pytest.raises(RuntimeError, match="uv sync --extra local"):
-        await provider.embed("stays on device")
+    vec = await provider.embed("stays on device")
+    assert provider._backend == "hashing"
+    assert len(vec) == 384
+    assert abs(sum(v * v for v in vec) - 1.0) < 1e-6
+    assert vec == await provider.embed("stays on device")
+    assert "uv sync --extra local" in provider.install_hint
+    await provider.close()

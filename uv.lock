@@ -2775,8 +2775,8 @@ wheels = [
 ]
 
 [[package]]
-name = "strata-memory-mcp"
-version = "2.1.0"
+name = "strata-memory"
+version = "2.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },

@@ -16,6 +16,8 @@ EXPECTED_TOOLS = [
     "promote_session",
     "recall_context",
     "expand_memory_detail",
+    "forget_memory",
+    "export_memories",
     "strata_doctor",
     "strata_rebuild_index",
     "strata_stats",
