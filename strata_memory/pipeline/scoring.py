@@ -28,7 +28,7 @@ Cooling-off buffer: 48h delay before any promotion decision
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
 
 
 def compute_score(
@@ -54,6 +54,7 @@ def compute_score(
     """
     if decay_rates is None:
         from ..config import decay_rate_for as drf
+
         decay_rate = drf(category)
     else:
         decay_rate = decay_rates.get(category, 0.93)
@@ -65,7 +66,7 @@ def compute_score(
     salience_factor = math.exp(emotional_salience)
 
     # Time decay: exponential (Ebbinghaus)
-    decay_factor = decay_rate ** days_since_last_access
+    decay_factor = decay_rate**days_since_last_access
 
     score = base_importance * usage_factor * salience_factor * decay_factor
     return round(score, 4)
@@ -127,13 +128,36 @@ def estimate_emotional_salience(text: str) -> float:
     Returns a float 0.0–1.0 indicating emotional intensity.
     """
     high_emotion_words = [
-        "崩溃", "绝望", "兴奋", "狂喜", "愤怒", "恐惧", "震惊",
-        "amazing", "terrible", "devastat", "thrilled", "furious",
-        "全搞砸了", "彻底完了", "太棒了", "激动",
+        "崩溃",
+        "绝望",
+        "兴奋",
+        "狂喜",
+        "愤怒",
+        "恐惧",
+        "震惊",
+        "amazing",
+        "terrible",
+        "devastat",
+        "thrilled",
+        "furious",
+        "全搞砸了",
+        "彻底完了",
+        "太棒了",
+        "激动",
     ]
     medium_emotion_words = [
-        "开心", "难过", "焦虑", "担心", "满意", "失望", "紧张",
-        "happy", "sad", "worried", "anxious", "excited",
+        "开心",
+        "难过",
+        "焦虑",
+        "担心",
+        "满意",
+        "失望",
+        "紧张",
+        "happy",
+        "sad",
+        "worried",
+        "anxious",
+        "excited",
     ]
 
     text_lower = text.lower()

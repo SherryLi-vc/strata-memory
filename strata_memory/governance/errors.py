@@ -50,9 +50,7 @@ def error_payload(
     retry_safe: bool = True,
     fields: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    return ToolError(
-        code, message, fix=fix, retry_safe=retry_safe, fields=fields
-    ).to_dict()
+    return ToolError(code, message, fix=fix, retry_safe=retry_safe, fields=fields).to_dict()
 
 
 def success_payload(data: dict[str, Any], *, message: str = "ok") -> dict[str, Any]:

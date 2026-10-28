@@ -13,8 +13,8 @@ Psych foundation: Collins & Quillian (1969) Semantic Network model.
 
 from __future__ import annotations
 
-import sqlite3
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -84,12 +84,13 @@ class TripleStore:
     def upsert(self, subject: str, predicate: str, object_: str, **kwargs) -> str:
         """Insert or update a triple. Returns the triple id."""
         import uuid
+
         triple_id = kwargs.pop("id", None) or uuid.uuid4().hex[:16]
 
         with sqlite3.connect(str(self.db_path)) as conn:
             existing = conn.execute(
                 "SELECT id, usage_count FROM triples WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-                (subject, predicate, object_)
+                (subject, predicate, object_),
             ).fetchone()
 
             if existing:
@@ -110,7 +111,7 @@ class TripleStore:
                         json.dumps(kwargs.get("context_tags", [])),
                         kwargs.get("decontextualized", ""),
                         triple_id,
-                    )
+                    ),
                 )
             else:
                 conn.execute(
@@ -121,7 +122,10 @@ class TripleStore:
                        episode_index, is_negative_schema, decontextualized)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
-                        triple_id, subject, predicate, object_,
+                        triple_id,
+                        subject,
+                        predicate,
+                        object_,
                         kwargs.get("confidence", 1.0),
                         kwargs.get("importance", 0.5),
                         kwargs.get("emotional_salience", 0.0),
@@ -134,7 +138,7 @@ class TripleStore:
                         kwargs.get("episode_index", ""),
                         kwargs.get("is_negative_schema", False),
                         kwargs.get("decontextualized", ""),
-                    )
+                    ),
                 )
             conn.commit()
         return triple_id
@@ -144,13 +148,18 @@ class TripleStore:
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute(
                 "UPDATE triples SET valid_to=? WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
-                (datetime.now().isoformat(), subject, predicate, object_)
+                (datetime.now().isoformat(), subject, predicate, object_),
             )
             conn.commit()
 
-    def query(self, subject: Optional[str] = None, predicate: Optional[str] = None,
-              object_: Optional[str] = None, exclude_negative: bool = True,
-              limit: int = 50) -> list[dict]:
+    def query(
+        self,
+        subject: Optional[str] = None,
+        predicate: Optional[str] = None,
+        object_: Optional[str] = None,
+        exclude_negative: bool = True,
+        limit: int = 50,
+    ) -> list[dict]:
         """Query triples with optional filters."""
         parts = ["SELECT * FROM triples WHERE valid_to IS NULL"]
         params: list = []
@@ -176,13 +185,14 @@ class TripleStore:
 
         return [dict(r) for r in rows]
 
-    def audit_log(self, action: str, agent_id: str, target: str,
-                  summary: str = "", before: str = "", after: str = "") -> None:
+    def audit_log(
+        self, action: str, agent_id: str, target: str, summary: str = "", before: str = "", after: str = ""
+    ) -> None:
         """Write to the audit_log table."""
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.execute(
                 """INSERT INTO audit_log (action, agent_id, target, summary, before_snap, after_snap)
                    VALUES (?,?,?,?,?,?)""",
-                (action, agent_id, target, summary, before, after)
+                (action, agent_id, target, summary, before, after),
             )
             conn.commit()

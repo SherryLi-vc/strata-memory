@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 # Extended distortion patterns (CN + EN)
 DISTORTION_RULES: list[tuple[str, str]] = [
@@ -53,9 +52,7 @@ class CBTMiddleware:
     def __init__(self, *, enabled: bool = True, cooling_hours: int = 48):
         self.enabled = enabled
         self.cooling_hours = cooling_hours
-        self._compiled = [
-            (re.compile(pat, re.IGNORECASE), name) for pat, name in DISTORTION_RULES
-        ]
+        self._compiled = [(re.compile(pat, re.IGNORECASE), name) for pat, name in DISTORTION_RULES]
 
     def redact(self, text: str) -> RedactionResult:
         out = text
@@ -76,10 +73,12 @@ class CBTMiddleware:
 
         for cre, name in self._compiled:
             if cre.search(red.text):
-                assessment.distortions.append({
-                    "detected_distortion": name,
-                    "is_negative_schema": True,
-                })
+                assessment.distortions.append(
+                    {
+                        "detected_distortion": name,
+                        "is_negative_schema": True,
+                    }
+                )
 
         if assessment.distortions:
             assessment.is_negative_schema = True

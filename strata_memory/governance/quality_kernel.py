@@ -120,8 +120,7 @@ class QualityKernel:
                 reject_code="INVALID_MEMORY_TYPE",
                 reject_message=f"memory_type={mtype!r} is not allowed.",
                 fix=(
-                    "Use one of: factual_truth | user_preference | "
-                    "procedure_rule | episodic_event | decision_record."
+                    "Use one of: factual_truth | user_preference | procedure_rule | episodic_event | decision_record."
                 ),
             )
 
@@ -130,8 +129,7 @@ class QualityKernel:
                 accepted=False,
                 reject_code="CLAIM_TOO_SHORT",
                 reject_message=f"fact_claim must be ≥ {MIN_CLAIM_CHARS} characters.",
-                fix="Write a compressed third-person fact, e.g. "
-                    "'User prefers dark mode in VS Code with Monokai Pro.'",
+                fix="Write a compressed third-person fact, e.g. 'User prefers dark mode in VS Code with Monokai Pro.'",
             )
 
         if len(claim) > MAX_CLAIM_CHARS:
@@ -167,7 +165,7 @@ class QualityKernel:
                     reject_code="SECRET_DETECTED",
                     reject_message="fact_claim appears to contain credentials or secrets.",
                     fix="Redact secrets. Store only non-sensitive facts "
-                        "(e.g. 'User uses SiliconFlow for embeddings' — never the key).",
+                    "(e.g. 'User uses SiliconFlow for embeddings' — never the key).",
                     metadata={"retry_safe": False},
                 )
 
@@ -185,7 +183,7 @@ class QualityKernel:
                 reject_code="SPECULATION_AS_TRUTH",
                 reject_message="Speculative language cannot be stored as factual_truth.",
                 fix="Either reclassify as episodic_event with lower confidence, "
-                    "or rewrite as verified third-person fact without 也许/可能/probably.",
+                "or rewrite as verified third-person fact without 也许/可能/probably.",
             )
 
         if FUZZY_TIME_PATTERNS.search(claim):
@@ -194,8 +192,8 @@ class QualityKernel:
                 reject_code="FUZZY_TIME",
                 reject_message="fact_claim contains relative/fuzzy time references.",
                 fix="Replace '刚才/昨天/today' with absolute anchors "
-                    "(ISO date or explicit event name). Example: "
-                    "'On 2026-08-04 user decided to migrate storage to SQLite.'",
+                "(ISO date or explicit event name). Example: "
+                "'On 2026-08-04 user decided to migrate storage to SQLite.'",
             )
 
         # Low confidence → scratch only (session buffer), not durable L0/L2.

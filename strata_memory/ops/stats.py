@@ -62,17 +62,21 @@ def strata_stats(
     for layer, w in waterlines.items():
         util = w.get("utilization")
         if util is not None and util > 0.85:
-            alerts.append({
-                "layer": layer,
-                "severity": "high",
-                "message": f"{layer} utilization {util:.0%} — risk of context overflow on deep recall.",
-            })
+            alerts.append(
+                {
+                    "layer": layer,
+                    "severity": "high",
+                    "message": f"{layer} utilization {util:.0%} — risk of context overflow on deep recall.",
+                }
+            )
         elif util is not None and util > 0.6:
-            alerts.append({
-                "layer": layer,
-                "severity": "medium",
-                "message": f"{layer} utilization {util:.0%}.",
-            })
+            alerts.append(
+                {
+                    "layer": layer,
+                    "severity": "medium",
+                    "message": f"{layer} utilization {util:.0%}.",
+                }
+            )
 
     traj = store.trajectory_summary(limit=30)
     vc = 0
@@ -84,9 +88,7 @@ def strata_stats(
 
     user_slice = None
     if user_id:
-        user_layers = store.count_by_layer(
-            tenant_id=config.tenant_id or "", user_id=user_id
-        )
+        user_layers = store.count_by_layer(tenant_id=config.tenant_id or "", user_id=user_id)
         user_slice = {"user_id": user_id, "by_layer": user_layers}
 
     return {

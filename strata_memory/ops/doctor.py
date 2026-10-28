@@ -27,17 +27,21 @@ def strata_doctor(
     checks: list[dict[str, Any]] = []
 
     palace = Path(config.palace_path)
-    checks.append({
-        "name": "initialized",
-        "ok": is_initialized(str(palace)),
-        "detail": str(palace),
-    })
+    checks.append(
+        {
+            "name": "initialized",
+            "ok": is_initialized(str(palace)),
+            "detail": str(palace),
+        }
+    )
     if not is_initialized(str(palace)):
-        issues.append({
-            "severity": "error",
-            "code": "NOT_INITIALIZED",
-            "message": "config.json missing — run strata_init first.",
-        })
+        issues.append(
+            {
+                "severity": "error",
+                "code": "NOT_INITIALIZED",
+                "message": "config.json missing — run strata_init first.",
+            }
+        )
 
     # API key health (never print full key). Env can switch provider and endpoint.
     embedding = resolve_embedding_settings(config.embedding)
@@ -53,33 +57,37 @@ def strata_doctor(
             "reason": "not_required",
             "prefix": key_stat.get("prefix") or "",
         }
-    checks.append({
-        "name": "embedding_api_key",
-        "ok": bool(key_stat.get("usable")),
-        "detail": {
-            **key_stat,
-            "provider": embedding.provider,
-            "model": embedding.model,
-            "base_url": embedding.base_url,
-            "dimension": embedding.dimension,
-            "key_required": requires_key,
-            "env_STRATA_API_KEY_set": bool(__import__("os").environ.get("STRATA_API_KEY")),
-            "env_SILICONFLOW_API_KEY_set": bool(__import__("os").environ.get("SILICONFLOW_API_KEY")),
-            "env_OPENAI_API_KEY_set": bool(__import__("os").environ.get("OPENAI_API_KEY")),
-        },
-    })
+    checks.append(
+        {
+            "name": "embedding_api_key",
+            "ok": bool(key_stat.get("usable")),
+            "detail": {
+                **key_stat,
+                "provider": embedding.provider,
+                "model": embedding.model,
+                "base_url": embedding.base_url,
+                "dimension": embedding.dimension,
+                "key_required": requires_key,
+                "env_STRATA_API_KEY_set": bool(__import__("os").environ.get("STRATA_API_KEY")),
+                "env_SILICONFLOW_API_KEY_set": bool(__import__("os").environ.get("SILICONFLOW_API_KEY")),
+                "env_OPENAI_API_KEY_set": bool(__import__("os").environ.get("OPENAI_API_KEY")),
+            },
+        }
+    )
     if requires_key and not is_usable_api_key(resolved):
-        issues.append({
-            "severity": "error",
-            "code": "EMBEDDING_API_KEY_MISSING",
-            "message": (
-                f"No usable API key for {embedding.provider} "
-                f"(reason={key_stat.get('reason')}, length={key_stat.get('length', 0)}, "
-                f"base_url={embedding.base_url}). "
-                "Set STRATA_EMBEDDING_API_KEY or STRATA_API_KEY. "
-                "Do not use redacted keys containing '...'."
-            ),
-        })
+        issues.append(
+            {
+                "severity": "error",
+                "code": "EMBEDDING_API_KEY_MISSING",
+                "message": (
+                    f"No usable API key for {embedding.provider} "
+                    f"(reason={key_stat.get('reason')}, length={key_stat.get('length', 0)}, "
+                    f"base_url={embedding.base_url}). "
+                    "Set STRATA_EMBEDDING_API_KEY or STRATA_API_KEY. "
+                    "Do not use redacted keys containing '...'."
+                ),
+            }
+        )
 
     # SQLite stats
     try:
@@ -103,39 +111,48 @@ def strata_doctor(
     # Hash duplicates + secret residual sample
     try:
         dups = store.find_hash_duplicates(tenant_id=config.tenant_id or "")
-        checks.append({
-            "name": "hash_duplicates",
-            "ok": len(dups) == 0,
-            "detail": {"groups": len(dups), "sample": dups[:5]},
-        })
+        checks.append(
+            {
+                "name": "hash_duplicates",
+                "ok": len(dups) == 0,
+                "detail": {"groups": len(dups), "sample": dups[:5]},
+            }
+        )
         if dups:
-            issues.append({
-                "severity": "warn",
-                "code": "HASH_DUPLICATES",
-                "message": f"{len(dups)} content_hash groups with >1 active row. Run strata_hygiene.",
-            })
+            issues.append(
+                {
+                    "severity": "warn",
+                    "code": "HASH_DUPLICATES",
+                    "message": f"{len(dups)} content_hash groups with >1 active row. Run strata_hygiene.",
+                }
+            )
     except Exception as e:
         issues.append({"severity": "warn", "code": "DUP_SCAN_FAILED", "message": str(e)})
 
     try:
         from ..governance.quality_kernel import SECRET_PATTERNS
+
         sample = store.iter_for_index(tenant_id=config.tenant_id or "")[:300]
         secret_n = 0
         for r in sample:
             text = r.get("fact_claim") or ""
             if any(p.search(text) for p in SECRET_PATTERNS):
                 secret_n += 1
-        checks.append({
-            "name": "secret_residual_sample",
-            "ok": secret_n == 0,
-            "detail": {"scanned": len(sample), "hits": secret_n},
-        })
+        checks.append(
+            {
+                "name": "secret_residual_sample",
+                "ok": secret_n == 0,
+                "detail": {"scanned": len(sample), "hits": secret_n},
+            }
+        )
         if secret_n:
-            issues.append({
-                "severity": "error",
-                "code": "SECRET_RESIDUAL",
-                "message": f"{secret_n} active claims look secret-like. Review via strata_hygiene.",
-            })
+            issues.append(
+                {
+                    "severity": "error",
+                    "code": "SECRET_RESIDUAL",
+                    "message": f"{secret_n} active claims look secret-like. Review via strata_hygiene.",
+                }
+            )
     except Exception as e:
         issues.append({"severity": "warn", "code": "SECRET_SCAN_FAILED", "message": str(e)})
 
@@ -145,23 +162,26 @@ def strata_doctor(
 
     # Drift: more vectors than durable is OK (legacy); zero vectors with many memories → warn
     if st and durable > 10 and vector_count == 0:
-        issues.append({
-            "severity": "warn",
-            "code": "INDEX_EMPTY",
-            "message": (
-                f"Truth Store has ~{durable} durable rows but vector index is empty. "
-                "Run strata_rebuild_index."
-            ),
-        })
+        issues.append(
+            {
+                "severity": "warn",
+                "code": "INDEX_EMPTY",
+                "message": (
+                    f"Truth Store has ~{durable} durable rows but vector index is empty. Run strata_rebuild_index."
+                ),
+            }
+        )
     if st and vector_count > durable * 3 + 50:
-        issues.append({
-            "severity": "warn",
-            "code": "INDEX_ORPHANS",
-            "message": (
-                f"Vector count ({vector_count}) >> durable SoT rows ({durable}). "
-                "Consider strata_rebuild_index to purge orphans."
-            ),
-        })
+        issues.append(
+            {
+                "severity": "warn",
+                "code": "INDEX_ORPHANS",
+                "message": (
+                    f"Vector count ({vector_count}) >> durable SoT rows ({durable}). "
+                    "Consider strata_rebuild_index to purge orphans."
+                ),
+            }
+        )
 
     # Orphan check sample: random sample of vector ids in SoT
     orphan_sample = 0
@@ -173,11 +193,13 @@ def strata_doctor(
                 # We can't cheaply get-by-id from chroma without API —
                 # count-level check is enough for doctor
                 pass
-            checks.append({
-                "name": "sample_sot_rows",
-                "ok": True,
-                "detail": {"sampled": len(rows)},
-            })
+            checks.append(
+                {
+                    "name": "sample_sot_rows",
+                    "ok": True,
+                    "detail": {"sampled": len(rows)},
+                }
+            )
         except Exception as e:
             issues.append({"severity": "warn", "code": "SAMPLE_FAILED", "message": str(e)})
 

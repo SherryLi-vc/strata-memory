@@ -71,6 +71,7 @@ _chroma: Optional[ChromaStore] = None
 _store: Optional[TruthStore] = None
 _auditor: Optional[AuditLogger] = None
 
+
 # Three-part description helper
 def _d(action: str, trigger: str, forbid: str) -> str:
     return f"作用：{action}\n触发：{trigger}\n禁忌：{forbid}"
@@ -202,12 +203,14 @@ def _json(data: Any) -> list[TextContent]:
 def _tool_error(e: Exception) -> list[TextContent]:
     if isinstance(e, ToolError):
         return _json(e.to_dict())
-    return _json(error_payload(
-        "INTERNAL_ERROR",
-        str(e),
-        fix="Inspect strata_doctor. If index-related, try strata_rebuild_index(confirm=true).",
-        retry_safe=True,
-    ))
+    return _json(
+        error_payload(
+            "INTERNAL_ERROR",
+            str(e),
+            fix="Inspect strata_doctor. If index-related, try strata_rebuild_index(confirm=true).",
+            retry_safe=True,
+        )
+    )
 
 
 # ── Server ──────────────────────────────────────────────────────────────
@@ -369,8 +372,7 @@ async def handle_list_tools() -> list[Tool]:
             description=_d(
                 "渐进式召回：Hybrid RRF（向量+FTS）返回 {id, summary, score} 卡片，控制 Token。",
                 "新会话开始、需要相关记忆时；默认 deep=L0+检索，shallow=仅核心画像。",
-                "禁止把返回结果当作全文；需要细节时必须再调 expand_memory_detail。"
-                "禁止无 query 的全库倾倒。",
+                "禁止把返回结果当作全文；需要细节时必须再调 expand_memory_detail。禁止无 query 的全库倾倒。",
             ),
             inputSchema={
                 "type": "object",
@@ -436,8 +438,7 @@ async def handle_list_tools() -> list[Tool]:
             description=_d(
                 "清空并从 SQLite 全量重建向量索引（重建级容灾）。",
                 "doctor 报告 INDEX_EMPTY/ORPHANS，或 embedding 模型/维度变更后。",
-                "必须 confirm=true。仅摧毁向量伴生层，绝不删除 SQLite 真相源。"
-                "禁止在无 API Key 时强行 rebuild。",
+                "必须 confirm=true。仅摧毁向量伴生层，绝不删除 SQLite 真相源。禁止在无 API Key 时强行 rebuild。",
             ),
             inputSchema={
                 "type": "object",
@@ -634,17 +635,20 @@ async def handle_read_resource(uri: str) -> str:
 
 # ── Handlers ────────────────────────────────────────────────────────────
 
+
 async def _handle_init(args: dict) -> dict:
     mode = args.get("mode", "personal")
     tenant_id = args.get("tenant_id", "")
     try:
-        embedding = resolve_embedding_settings(overrides={
-            "provider": args.get("provider"),
-            "model": args.get("model"),
-            "base_url": args.get("base_url"),
-            "dimension": args.get("dimension"),
-            "api_key": args.get("api_key"),
-        })
+        embedding = resolve_embedding_settings(
+            overrides={
+                "provider": args.get("provider"),
+                "model": args.get("model"),
+                "base_url": args.get("base_url"),
+                "dimension": args.get("dimension"),
+                "api_key": args.get("api_key"),
+            }
+        )
     except (ValueError, TypeError) as exc:
         return error_payload(
             "EMBEDDING_CONFIG_INVALID",
@@ -797,9 +801,8 @@ async def _handle_commit(args: dict) -> dict:
         result["vector_index_warning"] = embed_warning
         result["indexed"] = False
         result["message"] = (
-            (result.get("message") or "ok")
-            + " | Vector index skipped: fix STRATA_API_KEY then strata_rebuild_index(confirm=true)."
-        )
+            result.get("message") or "ok"
+        ) + " | Vector index skipped: fix STRATA_API_KEY then strata_rebuild_index(confirm=true)."
     return result
 
 

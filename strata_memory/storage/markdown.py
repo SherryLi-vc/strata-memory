@@ -20,8 +20,8 @@ from typing import Optional
 
 import frontmatter
 
-
 # ── Path builders ───────────────────────────────────────────────────────
+
 
 def _sanitize_path_segment(segment: str) -> str:
     """Strip path traversal sequences from a path segment."""
@@ -75,6 +75,7 @@ def room_index_path(palace: Path, wing: str, room: str, *, hall: str = "", mode:
 
 # ── Drawer listing ─────────────────────────────────────────────────────
 
+
 def list_drawers(
     palace: Path,
     wing: str,
@@ -118,6 +119,7 @@ def list_drawers(
 
 # ── Frontmatter read/write ─────────────────────────────────────────────
 
+
 def read_drawer(filepath: Path) -> frontmatter.Post:
     if not filepath.exists():
         raise FileNotFoundError(f"Drawer not found: {filepath}")
@@ -152,6 +154,7 @@ def write_drawer(filepath: Path, content: str, metadata: dict) -> None:
 
 # ── L1 Diary ───────────────────────────────────────────────────────────
 
+
 def read_l1_diary(palace: Path, wing: str, days: int = 3, *, mode: str = "personal") -> list[dict]:
     """Read recent L1 diary entries for a wing."""
     diary_dir = palace / "l1_diary" / wing
@@ -168,11 +171,13 @@ def read_l1_diary(palace: Path, wing: str, days: int = 3, *, mode: str = "person
         if (today - entry_date).days > days:
             continue
         post = frontmatter.load(str(d))
-        entries.append({
-            "date": d.stem,
-            "content": post.content.strip(),
-            "metadata": post.metadata or {},
-        })
+        entries.append(
+            {
+                "date": d.stem,
+                "content": post.content.strip(),
+                "metadata": post.metadata or {},
+            }
+        )
     return entries
 
 
@@ -188,6 +193,7 @@ def write_l1_diary(palace: Path, wing: str, content: str, d: Optional[date] = No
 
 
 # ── L0 Profile ─────────────────────────────────────────────────────────
+
 
 def read_l0_profile(palace: Path, wing: str) -> str:
     """Read L0 profile for a wing (permanent context)."""
@@ -207,6 +213,7 @@ def write_l0_profile(palace: Path, wing: str, content: str) -> None:
 
 # ── Audit log (Markdown-backed) ────────────────────────────────────────
 
+
 def write_audit_entry(
     palace: Path,
     action: str,
@@ -225,10 +232,7 @@ def write_audit_entry(
 
     timestamp = datetime.now().isoformat()
     entry = (
-        f"## {action} — {timestamp}\n\n"
-        f"- **Agent**: `{agent_id}`\n"
-        f"- **Target**: `{target}`\n"
-        f"- **Summary**: {summary}\n"
+        f"## {action} — {timestamp}\n\n- **Agent**: `{agent_id}`\n- **Target**: `{target}`\n- **Summary**: {summary}\n"
     )
     if before:
         entry += f"- **Before**: {before[:200]}\n"
@@ -242,6 +246,7 @@ def write_audit_entry(
 
 
 # ── Token estimation ───────────────────────────────────────────────────
+
 
 def estimate_tokens(text: str) -> int:
     """Rough token count estimate (≈ chars/3 for English/Chinese mix)."""

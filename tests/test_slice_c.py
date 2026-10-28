@@ -64,7 +64,10 @@ def test_supersede_near_dup(env):
 
     async def run():
         r1 = await commit_memory(
-            config=cfg, store=store, embed_provider=None, chroma=None,
+            config=cfg,
+            store=store,
+            embed_provider=None,
+            chroma=None,
             user_id="u1",
             memory_type="user_preference",
             fact_claim="User prefers dark mode in VS Code with Monokai theme daily.",
@@ -74,7 +77,10 @@ def test_supersede_near_dup(env):
         old_id = r1["memory_id"]
 
         r2 = await commit_memory(
-            config=cfg, store=store, embed_provider=None, chroma=None,
+            config=cfg,
+            store=store,
+            embed_provider=None,
+            chroma=None,
             user_id="u1",
             memory_type="user_preference",
             fact_claim="User prefers dark mode in VS Code with Monokai Pro theme daily.",
@@ -98,14 +104,20 @@ def test_recall_score_breakdown(env):
 
     async def run():
         await commit_memory(
-            config=cfg, store=store, embed_provider=None, chroma=None,
+            config=cfg,
+            store=store,
+            embed_provider=None,
+            chroma=None,
             user_id="u1",
             memory_type="factual_truth",
             fact_claim="Strata Memory uses SQLite as the single source of truth store.",
             confidence_score=0.95,
         )
         out = await recall_context(
-            config=cfg, store=store, embed_provider=None, chroma=None,
+            config=cfg,
+            store=store,
+            embed_provider=None,
+            chroma=None,
             user_id="u1",
             query="SQLite source of truth",
             limit=5,

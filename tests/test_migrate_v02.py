@@ -55,8 +55,7 @@ def palace_v02(tmp_path: Path) -> Path:
     # L0 profile
     (palace / "l0_profile" / "users" / "alice").mkdir(parents=True)
     (palace / "l0_profile" / "users" / "alice" / "profile.md").write_text(
-        "---\nwing: users/alice\n---\n\n"
-        "User is a senior backend engineer. Prefers Python and Go.\n",
+        "---\nwing: users/alice\n---\n\nUser is a senior backend engineer. Prefers Python and Go.\n",
         encoding="utf-8",
     )
     # Secret should be skipped
@@ -119,8 +118,6 @@ def test_apply_imports_and_dedup(palace_v02: Path):
 
 def test_user_filter(palace_v02: Path):
     store = TruthStore(truth_db_path(palace_v02))
-    report = migrate_palace(
-        palace_v02, dry_run=False, store=store, user_id_filter="nobody"
-    )
+    report = migrate_palace(palace_v02, dry_run=False, store=store, user_id_filter="nobody")
     assert report.imported == 0
     assert store.stats()["active"] == 0

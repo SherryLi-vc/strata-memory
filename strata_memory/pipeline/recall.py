@@ -119,24 +119,26 @@ async def recall_context(
             if r.get("session_id") != session_id:
                 filter_log.append({"id": r["id"], "reason": "scratch_other_session"})
                 continue
-            scratch_cards.append({
-                "id": r["id"],
-                "summary": r.get("summary") or r["fact_claim"][:240],
-                "memory_type": r["memory_type"],
-                "layer": "scratch",
-                "score": 0.55,
-                "score_breakdown": {
-                    "recency": 1.0,
-                    "relevance": 0.5,
-                    "importance": float(r.get("importance") or 0.5),
-                    "usage_boost": 0.0,
-                    "freshness": 1.0,
-                    "rrf_raw": 0.0,
-                    "final": 0.55,
-                    "why": "current session scratch",
-                },
-                "entity": r.get("entity") or None,
-            })
+            scratch_cards.append(
+                {
+                    "id": r["id"],
+                    "summary": r.get("summary") or r["fact_claim"][:240],
+                    "memory_type": r["memory_type"],
+                    "layer": "scratch",
+                    "score": 0.55,
+                    "score_breakdown": {
+                        "recency": 1.0,
+                        "relevance": 0.5,
+                        "importance": float(r.get("importance") or 0.5),
+                        "usage_boost": 0.0,
+                        "freshness": 1.0,
+                        "rrf_raw": 0.0,
+                        "final": 0.55,
+                        "why": "current session scratch",
+                    },
+                    "entity": r.get("entity") or None,
+                }
+            )
 
     if context_depth == "shallow":
         all_cards = l0_cards + scratch_cards
@@ -279,8 +281,7 @@ async def recall_context(
             },
             "filtered": filter_log[:30],
             "note": (
-                "Progressive disclosure: id+summary+score+score_breakdown. "
-                "Call expand_memory_detail for full detail."
+                "Progressive disclosure: id+summary+score+score_breakdown. Call expand_memory_detail for full detail."
             ),
         },
         message=f"Recall funnel returned {len(trimmed)} cards (~{used} tokens).",

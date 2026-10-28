@@ -84,9 +84,7 @@ def test_explicit_override_beats_env(clean_embed_env):
 
 
 def test_loopback_endpoint_does_not_require_a_key(clean_embed_env):
-    assert not embedding_requires_api_key(
-        "openai_compatible", "http://127.0.0.1:11434/v1"
-    )
+    assert not embedding_requires_api_key("openai_compatible", "http://127.0.0.1:11434/v1")
     assert not embedding_requires_api_key("openai_compatible", "http://localhost:8080/v1")
     assert embedding_requires_api_key("openai_compatible", "https://api.openai.com/v1")
 
@@ -94,12 +92,8 @@ def test_loopback_endpoint_does_not_require_a_key(clean_embed_env):
 def test_provider_specific_key_order(clean_embed_env):
     clean_embed_env.setenv("OPENAI_API_KEY", "sk-openaiopenaiopenaiopenaiopenai")
     clean_embed_env.setenv("SILICONFLOW_API_KEY", "sk-siliconflowsiliconflowsiliconflow")
-    silicon = resolve_embedding_settings(
-        EmbeddingConfig(), overrides={"provider": "siliconflow"}
-    )
-    openai = resolve_embedding_settings(
-        EmbeddingConfig(), overrides={"provider": "openai"}
-    )
+    silicon = resolve_embedding_settings(EmbeddingConfig(), overrides={"provider": "siliconflow"})
+    openai = resolve_embedding_settings(EmbeddingConfig(), overrides={"provider": "openai"})
     assert silicon.api_key.startswith("sk-silicon")
     assert openai.api_key.startswith("sk-openai")
 

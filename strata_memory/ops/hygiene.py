@@ -9,9 +9,8 @@ Actions (default dry_run=true):
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from ..config import Config
 from ..governance.quality_kernel import SECRET_PATTERNS
@@ -47,8 +46,7 @@ def strata_hygiene(
     if archive_expired:
         expired = store.list_expired(tenant_id=tenant_id, user_id=user_id or None, limit=200)
         report["expired_candidates"] = [
-            {"id": r["id"], "expires_at": r.get("expires_at"), "memory_type": r["memory_type"]}
-            for r in expired[:50]
+            {"id": r["id"], "expires_at": r.get("expires_at"), "memory_type": r["memory_type"]} for r in expired[:50]
         ]
         if not dry_run:
             n = 0
@@ -75,11 +73,13 @@ def strata_hygiene(
         text = r.get("fact_claim") or ""
         for pat in SECRET_PATTERNS:
             if pat.search(text):
-                secret_hits.append({
-                    "id": r["id"],
-                    "memory_type": r["memory_type"],
-                    "preview": text[:80],
-                })
+                secret_hits.append(
+                    {
+                        "id": r["id"],
+                        "memory_type": r["memory_type"],
+                        "preview": text[:80],
+                    }
+                )
                 break
     report["secret_hits"] = secret_hits[:20]
     report["secret_hit_count"] = len(secret_hits)
@@ -101,13 +101,15 @@ def strata_hygiene(
         issues.append(f"{len(report['expired_candidates'])}+ expired candidates (dry_run)")
 
     report["message"] = (
-        "Hygiene clean." if not issues
-        else "Hygiene findings: " + "; ".join(issues)
+        "Hygiene clean."
+        if not issues
+        else "Hygiene findings: "
+        + "; ".join(issues)
         + (". Re-run with dry_run=false to archive expired." if dry_run and report["expired_candidates"] else "")
     )
     report["recommendation"] = (
-        "All clear." if not issues
-        else "Review secret_hits manually; archive expired with dry_run=false; "
-             "resolve hash dups via supersede commits."
+        "All clear."
+        if not issues
+        else "Review secret_hits manually; archive expired with dry_run=false; resolve hash dups via supersede commits."
     )
     return report

@@ -69,9 +69,7 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         except ImportError:
             pass
         except Exception as exc:
-            raise RuntimeError(
-                f"fastembed failed to load model {self.model}: {exc}. {_INSTALL}"
-            ) from exc
+            raise RuntimeError(f"fastembed failed to load model {self.model}: {exc}. {_INSTALL}") from exc
         try:
             from sentence_transformers import SentenceTransformer
 
@@ -79,13 +77,9 @@ class LocalEmbeddingProvider(EmbeddingProvider):
             self._backend = "sentence_transformers"
             return
         except ImportError as exc:
-            raise RuntimeError(
-                f"No local embedding library is installed for model {self.model}. {_INSTALL}"
-            ) from exc
+            raise RuntimeError(f"No local embedding library is installed for model {self.model}. {_INSTALL}") from exc
         except Exception as exc:
-            raise RuntimeError(
-                f"sentence-transformers failed to load model {self.model}: {exc}. {_INSTALL}"
-            ) from exc
+            raise RuntimeError(f"sentence-transformers failed to load model {self.model}: {exc}. {_INSTALL}") from exc
 
     async def close(self) -> None:
         self._model = None

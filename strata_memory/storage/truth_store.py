@@ -190,9 +190,7 @@ class TruthStore:
         with self._conn() as conn:
             conn.executescript(MEMORIES_DDL)
             self._migrate_schema(conn)
-            row = conn.execute(
-                "SELECT value FROM schema_meta WHERE key='version'"
-            ).fetchone()
+            row = conn.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()
             if not row:
                 conn.execute(
                     "INSERT INTO schema_meta(key, value) VALUES ('version', ?)",
@@ -269,8 +267,8 @@ class TruthStore:
         expires_at = None
         if ttl_seconds is not None:
             expires_at = (
-                datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
-            ).replace(microsecond=0).isoformat()
+                (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).replace(microsecond=0).isoformat()
+            )
         layer = layer or ("scratch" if is_scratch else LAYER_DEFAULT.get(memory_type, "L2"))
         if is_scratch:
             layer = "scratch"
@@ -291,14 +289,39 @@ class TruthStore:
                     provenance
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    mid, tenant_id or "", user_id, session_id or "", memory_type,
-                    fact_claim, summary, detail, confidence, importance,
-                    emotional_salience, content_hash, layer, status or "active",
-                    1 if is_negative_schema else 0, 1 if is_scratch else 0,
-                    0, json.dumps(tags, ensure_ascii=False), room,
-                    ttl_seconds, ttl_days, expires_at, now, now, now, now, source,
-                    supersedes_id, authority or "agent", sensitivity or "normal",
-                    entity or "", validator_kind or "quality_kernel", prov,
+                    mid,
+                    tenant_id or "",
+                    user_id,
+                    session_id or "",
+                    memory_type,
+                    fact_claim,
+                    summary,
+                    detail,
+                    confidence,
+                    importance,
+                    emotional_salience,
+                    content_hash,
+                    layer,
+                    status or "active",
+                    1 if is_negative_schema else 0,
+                    1 if is_scratch else 0,
+                    0,
+                    json.dumps(tags, ensure_ascii=False),
+                    room,
+                    ttl_seconds,
+                    ttl_days,
+                    expires_at,
+                    now,
+                    now,
+                    now,
+                    now,
+                    source,
+                    supersedes_id,
+                    authority or "agent",
+                    sensitivity or "normal",
+                    entity or "",
+                    validator_kind or "quality_kernel",
+                    prov,
                 ),
             )
             if supersedes_id:
@@ -386,10 +409,7 @@ class TruthStore:
         parts.append("GROUP BY content_hash HAVING n > 1 ORDER BY n DESC LIMIT 50")
         with self._conn() as conn:
             rows = conn.execute(" ".join(parts), params).fetchall()
-        return [
-            {"content_hash": r["content_hash"], "count": r["n"], "ids": (r["ids"] or "").split(",")}
-            for r in rows
-        ]
+        return [{"content_hash": r["content_hash"], "count": r["n"], "ids": (r["ids"] or "").split(",")} for r in rows]
 
     def rebuild_fts(self) -> dict[str, Any]:
         """Rebuild FTS5 content from memories (companion index hygiene)."""
@@ -415,9 +435,7 @@ class TruthStore:
                 except Exception as e2:
                     return {"status": "error", "message": f"{e}; fallback={e2}"}
 
-    def find_by_hash(
-        self, tenant_id: str, user_id: str, content_hash: str
-    ) -> Optional[dict[str, Any]]:
+    def find_by_hash(self, tenant_id: str, user_id: str, content_hash: str) -> Optional[dict[str, Any]]:
         with self._conn() as conn:
             row = conn.execute(
                 """SELECT * FROM memories
@@ -430,9 +448,7 @@ class TruthStore:
 
     def get_by_id(self, memory_id: str) -> Optional[dict[str, Any]]:
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM memories WHERE id=?", (memory_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
         return dict(row) if row else None
 
     def touch(self, memory_id: str) -> None:
@@ -468,9 +484,7 @@ class TruthStore:
             )
             return cur.rowcount > 0
 
-    def promote_scratch(
-        self, tenant_id: str, user_id: str, session_id: str
-    ) -> list[str]:
+    def promote_scratch(self, tenant_id: str, user_id: str, session_id: str) -> list[str]:
         """Promote all scratch memories for a session into durable layers."""
         now = _utcnow()
         promoted: list[str] = []
@@ -561,16 +575,12 @@ class TruthStore:
         """
         with self._conn() as conn:
             try:
-                rows = conn.execute(
-                    sql, (fts_q, user_id, tenant_id or "", _utcnow())
-                ).fetchall()
+                rows = conn.execute(sql, (fts_q, user_id, tenant_id or "", _utcnow())).fetchall()
             except sqlite3.OperationalError:
                 return []
         return [dict(r) for r in rows]
 
-    def iter_for_index(
-        self, *, tenant_id: str = "", user_id: Optional[str] = None
-    ) -> list[dict[str, Any]]:
+    def iter_for_index(self, *, tenant_id: str = "", user_id: Optional[str] = None) -> list[dict[str, Any]]:
         """All active durable memories for vector rebuild."""
         parts = [
             "SELECT * FROM memories WHERE status='active' AND valid_to IS NULL",
@@ -589,9 +599,7 @@ class TruthStore:
             rows = conn.execute(" ".join(parts), params).fetchall()
         return [dict(r) for r in rows]
 
-    def count_by_layer(
-        self, *, tenant_id: str = "", user_id: Optional[str] = None
-    ) -> dict[str, int]:
+    def count_by_layer(self, *, tenant_id: str = "", user_id: Optional[str] = None) -> dict[str, int]:
         parts = [
             "SELECT layer, COUNT(*) AS n FROM memories",
             "WHERE status='active' AND valid_to IS NULL",
@@ -610,12 +618,8 @@ class TruthStore:
 
     def stats(self) -> dict[str, Any]:
         with self._conn() as conn:
-            total = conn.execute(
-                "SELECT COUNT(*) AS n FROM memories WHERE status='active'"
-            ).fetchone()["n"]
-            archived = conn.execute(
-                "SELECT COUNT(*) AS n FROM memories WHERE status='archived'"
-            ).fetchone()["n"]
+            total = conn.execute("SELECT COUNT(*) AS n FROM memories WHERE status='active'").fetchone()["n"]
+            archived = conn.execute("SELECT COUNT(*) AS n FROM memories WHERE status='archived'").fetchone()["n"]
             scratch = conn.execute(
                 "SELECT COUNT(*) AS n FROM memories WHERE is_scratch=1 AND status='active'"
             ).fetchone()["n"]
@@ -635,9 +639,7 @@ class TruthStore:
             ).fetchone()["chars"]
         layers = self.count_by_layer()
         with self._conn() as conn:
-            ver = conn.execute(
-                "SELECT value FROM schema_meta WHERE key='version'"
-            ).fetchone()
+            ver = conn.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()
             db_ver = int(ver["value"]) if ver else 0
         return {
             "active": total,
@@ -654,9 +656,7 @@ class TruthStore:
         }
 
     def candidates_for_digest(self, older_than_days: int = 30) -> list[dict[str, Any]]:
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=older_than_days)
-        ).replace(microsecond=0).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).replace(microsecond=0).isoformat()
         with self._conn() as conn:
             rows = conn.execute(
                 """SELECT * FROM memories
@@ -691,9 +691,16 @@ class TruthStore:
                     target, summary, before_snap, after_snap, created_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    action, agent_id, tenant_id or "", user_id or "",
-                    session_id or "", target, summary, before[:2000],
-                    after[:2000], _utcnow(),
+                    action,
+                    agent_id,
+                    tenant_id or "",
+                    user_id or "",
+                    session_id or "",
+                    target,
+                    summary,
+                    before[:2000],
+                    after[:2000],
+                    _utcnow(),
                 ),
             )
 
@@ -716,8 +723,14 @@ class TruthStore:
                     result_status, error_code, latency_ms, created_at)
                    VALUES (?,?,?,?,?,?,?,?,?)""",
                 (
-                    tool_name, tenant_id or "", user_id or "", session_id or "",
-                    args_digest[:500], result_status, error_code, latency_ms,
+                    tool_name,
+                    tenant_id or "",
+                    user_id or "",
+                    session_id or "",
+                    args_digest[:500],
+                    result_status,
+                    error_code,
+                    latency_ms,
                     _utcnow(),
                 ),
             )

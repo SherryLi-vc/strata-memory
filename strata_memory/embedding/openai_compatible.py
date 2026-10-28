@@ -78,24 +78,18 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
             )
         if resp.status_code >= 400:
             body = (resp.text or "")[:300]
-            raise RuntimeError(
-                f"{self.provider_label} embeddings HTTP {resp.status_code} "
-                f"at {self.base_url}: {body}"
-            )
+            raise RuntimeError(f"{self.provider_label} embeddings HTTP {resp.status_code} at {self.base_url}: {body}")
         data = resp.json()
         rows = data.get("data")
         if not isinstance(rows, list) or not rows:
             raise RuntimeError(
-                f"{self.provider_label} embeddings response at {self.base_url} "
-                "did not include data[].embedding."
+                f"{self.provider_label} embeddings response at {self.base_url} did not include data[].embedding."
             )
         embeddings: list[list[float]] = []
         for item in sorted(rows, key=lambda x: x.get("index", 0)):
             raw = item.get("embedding")
             if not isinstance(raw, list) or not raw:
-                raise RuntimeError(
-                    f"{self.provider_label} returned an empty embedding at {self.base_url}."
-                )
+                raise RuntimeError(f"{self.provider_label} returned an empty embedding at {self.base_url}.")
             vec = [float(x) for x in raw]
             embeddings.append(
                 fit_vector(

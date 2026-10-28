@@ -12,14 +12,14 @@ V2 adds: LLM triple extraction, nightly scoring, CBT detection, audit logging.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from ..config import Config
 from ..embedding import EmbeddingProvider
+from ..pipeline.scoring import estimate_emotional_salience
 from ..storage.chroma import ChromaStore, _doc_id
 from ..storage.markdown import drawer_path, write_drawer
-from ..pipeline.scoring import estimate_emotional_salience
 
 
 async def memorize(
@@ -51,6 +51,7 @@ async def memorize(
     is_negative_schema = False
     if config.cbt.enabled and config.cbt.detect_distortions:
         from ..safety import detect_distortions
+
         distortions = detect_distortions(content)
         is_negative_schema = len(distortions) > 0
 
@@ -80,17 +81,19 @@ async def memorize(
     doc_id = _doc_id(wing, room, today.isoformat())
     chroma.add(
         documents=[full_text],
-        metadatas=[{
-            "wing": wing,
-            "room": room,
-            "date": today.isoformat(),
-            "category": category,
-            "importance": fm["importance"],
-            "emotional_salience": emotional_salience,
-            "is_negative_schema": is_negative_schema,
-            "context_tags": ",".join(context_tags or []),
-            "tenant_id": config.tenant_id or "",
-        }],
+        metadatas=[
+            {
+                "wing": wing,
+                "room": room,
+                "date": today.isoformat(),
+                "category": category,
+                "importance": fm["importance"],
+                "emotional_salience": emotional_salience,
+                "is_negative_schema": is_negative_schema,
+                "context_tags": ",".join(context_tags or []),
+                "tenant_id": config.tenant_id or "",
+            }
+        ],
         ids=[doc_id],
         embeddings=[vec],
     )

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from strata_memory.governance.cbt_middleware import CBTMiddleware
 from strata_memory.governance.quality_kernel import QualityKernel
 

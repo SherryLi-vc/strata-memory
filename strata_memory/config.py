@@ -287,9 +287,7 @@ def resolve_embedding_settings(
     model, base URL, or dimension uses that provider's defaults.
     """
     saved = saved or EmbeddingConfig()
-    overrides = {
-        k: v for k, v in (overrides or {}).items() if v is not None and str(v).strip() != ""
-    }
+    overrides = {k: v for k, v in (overrides or {}).items() if v is not None and str(v).strip() != ""}
     saved_kind = normalize_embedding_provider(saved.provider or DEFAULT_EMBEDDING_PROVIDER)
 
     if "provider" in overrides:
