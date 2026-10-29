@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 
 import httpx
@@ -261,6 +262,14 @@ async def test_hash_backend_env_skips_semantic_load(clean_embed_env):
 
 @pytest.mark.asyncio
 async def test_local_without_extra_uses_hashing_embedder(clean_embed_env):
+    original_import = builtins.__import__
+
+    def import_without_local_extras(name, *args, **kwargs):
+        if name in {"fastembed", "sentence_transformers"}:
+            raise ImportError(f"simulated missing optional dependency: {name}")
+        return original_import(name, *args, **kwargs)
+
+    clean_embed_env.setattr(builtins, "__import__", import_without_local_extras)
     provider = LocalEmbeddingProvider(model="sentence-transformers/all-MiniLM-L6-v2", dimension=384)
     vec = await provider.embed("stays on device")
     assert provider._backend == "hashing"
