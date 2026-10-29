@@ -130,6 +130,29 @@ def incompatibility(persist_dir: Path, ident: dict[str, Any], *, vector_count: i
     return None
 
 
+def write_compatibility(persist_dir: Path, ident: dict[str, Any], count) -> tuple[Optional[str], bool]:
+    """Check before adding a vector, reading the stamp first.
+
+    Returns ``(problem, needs_stamp)``. ``count`` is a zero-argument callable
+    and is only called when there is no stamp, because only an unstamped
+    index can be compatible (when it is empty). A matching stamp needs no
+    count and no rewrite, which keeps it off the per-write hot path.
+    """
+    stored = read_stamp(persist_dir)
+    if stored is not None:
+        for key in ("provider", "model", "dimension", "backend"):
+            if str(stored.get(key)) != str(ident.get(key)):
+                return "EMBEDDER_MISMATCH", False
+        return None, False
+    try:
+        vector_count = int(count())
+    except Exception:
+        vector_count = 0
+    if vector_count > 0:
+        return "EMBEDDER_UNSTAMPED", False
+    return None, True
+
+
 def mismatch_message(code: str, ident: dict[str, Any]) -> str:
     if code == "EMBEDDER_UNSTAMPED":
         return (
