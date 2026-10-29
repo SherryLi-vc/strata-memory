@@ -24,6 +24,16 @@ _CANDIDATE_LIMIT = 300
 _RELEVANCE_FLOOR = 0.05
 
 
+def _hybrid_relevance(lex_norm: float, vsim: Optional[float], config: Config) -> float:
+    if lex_norm > 0 and vsim is not None:
+        return config.fusion.lexical_weight * lex_norm + config.fusion.vector_weight * vsim
+    if lex_norm > 0:
+        return lex_norm
+    if vsim is not None:
+        return config.fusion.vector_weight * vsim
+    return 0.0
+
+
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3)
 
@@ -217,14 +227,7 @@ async def recall_context(
         raw_lex = float(lexical.get(row["id"], 0.0))
         lex_norm = squash_lexical(raw_lex)
         vsim = vector_sim.get(row["id"])
-        if lex_norm > 0 and vsim is not None:
-            relevance = 0.75 * lex_norm + 0.25 * vsim
-        elif lex_norm > 0:
-            relevance = lex_norm
-        elif vsim is not None:
-            relevance = 0.25 * vsim
-        else:
-            relevance = 0.0
+        relevance = _hybrid_relevance(lex_norm, vsim, config)
         if relevance < _RELEVANCE_FLOOR:
             filter_log.append({"id": row["id"], "reason": "below_relevance"})
             continue
@@ -308,6 +311,8 @@ async def recall_context(
         payload["fusion"] = {
             "vector_hits": len(vector_ids),
             "fts_hits": len(fts_ids),
+            "lexical_weight": config.fusion.lexical_weight,
+            "vector_weight": config.fusion.vector_weight,
             "rerank": "lexical_bm25+multi_signal_v3",
         }
         if vector_skipped:
