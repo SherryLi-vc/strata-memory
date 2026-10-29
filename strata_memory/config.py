@@ -105,6 +105,11 @@ class AuditConfig(BaseModel):
     retention_days: int = 365
 
 
+class FusionConfig(BaseModel):
+    lexical_weight: float = 0.75
+    vector_weight: float = 0.25
+
+
 class Config(BaseModel):
     palace_path: str = ""
     version: str = __version__
@@ -115,6 +120,7 @@ class Config(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     cbt: CBTConfig = Field(default_factory=CBTConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    fusion: FusionConfig = Field(default_factory=FusionConfig)
 
     # Memory parameters
     l1_days: int = 3
@@ -395,6 +401,10 @@ def load_config(palace_path: Optional[str] = None) -> Config:
         cfg = Config(palace_path=str(palace))
     if _env_str("STRATA_ON_SECRET"):
         cfg.on_secret = normalize_on_secret(_env_str("STRATA_ON_SECRET"))
+    if _env_str("STRATA_FUSION_LEXICAL_WEIGHT"):
+        cfg.fusion.lexical_weight = float(_env_str("STRATA_FUSION_LEXICAL_WEIGHT"))
+    if _env_str("STRATA_FUSION_VECTOR_WEIGHT"):
+        cfg.fusion.vector_weight = float(_env_str("STRATA_FUSION_VECTOR_WEIGHT"))
     # Env overrides provider, model, base URL, dimension, and key when set.
     cfg.embedding = resolve_embedding_settings(cfg.embedding)
     log_effective_embedding(

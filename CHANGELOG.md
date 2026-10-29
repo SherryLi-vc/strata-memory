@@ -2,6 +2,8 @@
 
 ## [2.2.1] — 2026-10-28
 
+- Hybrid recall fusion weights are configurable, with a deterministic held-out R@1/R@3 evaluation harness.
+
 ### Docs and install
 - README, README.zh-CN, SKILL.md, the `setup --host` snippets and the shipped JSON templates install from git (`uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp`). `uvx strata-memory-mcp` is marked coming soon until the first PyPI release.
 - Tool count is 13 everywhere (README, README.zh-CN, SKILL.md, DEVELOPMENT.md); a test checks the docs against the tools the server registers.
