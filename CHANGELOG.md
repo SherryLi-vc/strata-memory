@@ -7,6 +7,10 @@
 - `strata_doctor` checks vector coverage by id (`vector_coverage`, `INDEX_INCOMPLETE`). After a failed or interrupted rebuild it reports `degraded` instead of healthy.
 - `recall_context` on an index without an embedder stamp (built before 2.2.1) falls back to lexical recall with `fusion.vector_skipped` and a warning instead of failing with `EMBEDDER_UNSTAMPED`. Run `strata_rebuild_index(confirm=true)` once after upgrading. See "Upgrading from an older version" in the README.
 
+### Privacy and isolation
+- `recall_context` treats an empty `tenant_id` as the default tenant, not a wildcard. Lexical, FTS and vector candidates are all checked against the SQLite row's `tenant_id` and `user_id`; the vector query always filters on `tenant_id`. Previously an empty tenant could return another tenant's rows for the same `user_id`.
+- The `recall_context` audit row stores `q_len`, hit and token counts, not the query text. Older rows written as `q=<text> ...` are rewritten to `q=[redacted] ...` when the store opens, with `secure_delete` and a WAL checkpoint so the text leaves the database files.
+
 ### Packaging
 - One version, 2.2.1, everywhere: `pyproject.toml`, `__version__`, the MCP handshake `server_version`, `strata_init`, the CLI, new configs, and the skill metadata. A test keeps them in sync.
 - `.github/workflows/release.yml` publishes with PyPI Trusted Publishing (OIDC, no stored token): a manual run publishes a `.devN` build to TestPyPI (environment `testpypi`); a published GitHub release whose tag matches the version publishes to PyPI (environment `pypi`). `testpypi.yml` is folded into it.

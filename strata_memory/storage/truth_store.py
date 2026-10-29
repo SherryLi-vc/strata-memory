@@ -170,6 +170,31 @@ class TruthStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._scrub_recall_query_audit()
+
+    def _scrub_recall_query_audit(self) -> int:
+        """Remove query text that older versions wrote into recall audit rows (N5).
+
+        ``summary`` used to be ``q=<query[:80]> hits=N tokens~M``. Keep the
+        counters, drop the text, and zero the freed bytes on disk.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, summary FROM audit_log WHERE action='recall_context' AND summary LIKE 'q=%'"
+            ).fetchall()
+            if not rows:
+                return 0
+            conn.execute("PRAGMA secure_delete = ON")
+            for row in rows:
+                summary = row["summary"] or ""
+                _, sep, tail = summary.rpartition(" hits=")
+                conn.execute(
+                    "UPDATE audit_log SET summary=? WHERE id=?",
+                    (f"q=[redacted]{sep}{tail}" if sep else "q=[redacted]", row["id"]),
+                )
+        with self._conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return len(rows)
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:

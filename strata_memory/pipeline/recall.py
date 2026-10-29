@@ -135,9 +135,8 @@ async def recall_context(
             if not vector_skipped:
                 try:
                     qvec = probe if probe is not None else await embed_provider.embed(query)
-                    where: dict[str, Any] = {"user_id": user_id}
-                    if tenant_id:
-                        where = {"$and": [{"user_id": user_id}, {"tenant_id": tenant_id}]}
+                    # An empty tenant is the default tenant, not a wildcard (H2).
+                    where: dict[str, Any] = {"$and": [{"user_id": user_id}, {"tenant_id": tenant_id}]}
                     vres = chroma.query(query_embedding=qvec, top_k=limit * 4, where=where)
                     for hit in vres:
                         mid = hit.get("id")
@@ -157,6 +156,11 @@ async def recall_context(
 
     candidates: list[dict[str, Any]] = []
     for row in by_id.values():
+        # SoT is authoritative for scope: lexical and vector paths both filter
+        # tenant only when it is non-empty, so enforce an exact match here.
+        if (row.get("tenant_id") or "") != tenant_id or row.get("user_id") != user_id:
+            filter_log.append({"id": row["id"], "reason": "out_of_scope"})
+            continue
         if row.get("status") != "active":
             filter_log.append({"id": row["id"], "reason": "inactive_or_missing"})
             continue
@@ -245,7 +249,8 @@ async def recall_context(
         user_id=user_id,
         session_id=session_id,
         target=user_id,
-        summary=f"q={query[:80]} hits={len(trimmed)} tokens~{used}",
+        # Do not keep the query text: it is user content that forget cannot reach (N5).
+        summary=f"q_len={len(query)} hits={len(trimmed)} tokens~{used}",
     )
 
     payload: dict[str, Any] = {

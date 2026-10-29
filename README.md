@@ -217,9 +217,7 @@ Indexes built before 2.2.1 have no embedder stamp (`l2_vector/embedder.json`). A
 
 ## Known issues
 
-Known limitation:
-
-- With an empty `tenant_id`, vector recall can return another tenant's rows for the same `user_id`, because that query filters only on `user_id`.
+- The default install embeds with an offline hashing fallback, which matches shared words, not meaning. Install the `local` extra (fastembed) for semantic recall.
 
 ## Develop
 
