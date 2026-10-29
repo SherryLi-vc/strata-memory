@@ -1,7 +1,7 @@
-"""Remember which embedder built the vector index.
+"""Remember which embedder built the chroma.
 
 Vectors from different providers or models are not comparable, even when the
-dimension matches. The stamp sits next to the Chroma directory. A mismatch
+dimension matches. The stamp sits next to the SQLite chroma directory. A mismatch
 refuses vector reads and writes until ``strata_rebuild_index(confirm=true)``.
 """
 
@@ -156,11 +156,11 @@ def write_compatibility(persist_dir: Path, ident: dict[str, Any], count) -> tupl
 def mismatch_message(code: str, ident: dict[str, Any]) -> str:
     if code == "EMBEDDER_UNSTAMPED":
         return (
-            "The vector index has no embedder stamp, so its vectors cannot be "
+            "The chroma has no embedder stamp, so its vectors cannot be "
             f"mixed with {ident['provider']}/{ident['model']} ({ident['backend']})."
         )
     return (
-        "The vector index was built with a different embedder than "
+        "The chroma was built with a different embedder than "
         f"{ident['provider']}/{ident['model']} backend={ident['backend']} "
         f"dimension={ident['dimension']}."
     )

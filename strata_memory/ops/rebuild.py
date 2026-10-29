@@ -7,10 +7,10 @@ from typing import Any
 from ..config import Config
 from ..embedder_stamp import identity_for, incompatibility, read_stamp, stamp_path, write_stamp
 from ..embedding import EmbeddingProvider
-from ..storage.chroma import ChromaStore
+from ..storage.sqlite_vectors import SqliteVectorStore
 from ..storage.truth_store import TruthStore
 
-# Chroma and the embedding providers both accept lists; cap each request to keep
+# The vector store and embedding providers both accept lists; cap each request to keep
 # memory use bounded during large rebuilds.
 REBUILD_BATCH_SIZE = 128
 
@@ -42,7 +42,7 @@ def _rebuild_item(row: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
     return text, metadata, row["id"]
 
 
-async def _write_row(row: dict[str, Any], embed_provider: EmbeddingProvider, chroma: ChromaStore) -> None:
+async def _write_row(row: dict[str, Any], embed_provider: EmbeddingProvider, chroma: SqliteVectorStore) -> None:
     text, metadata, row_id = _rebuild_item(row)
     vec = await embed_provider.embed(text)
     chroma.add(documents=[text], metadatas=[metadata], ids=[row_id], embeddings=[vec])
@@ -53,12 +53,12 @@ async def strata_rebuild_index(
     config: Config,
     store: TruthStore,
     embed_provider: EmbeddingProvider,
-    chroma: ChromaStore,
+    chroma: SqliteVectorStore,
     confirm: bool = False,
     tenant_id: str = "",
 ) -> dict[str, Any]:
     """
-    Re-embed active durable memories from SoT into the vector index.
+    Re-embed active durable memories from SoT into the chroma.
 
     Without a tenant: replace the whole collection. With a tenant (argument or
     config): delete and re-add only that tenant's vectors, keeping the rest.
@@ -72,7 +72,7 @@ async def strata_rebuild_index(
         return {
             "status": "error",
             "error_code": "CONFIRMATION_REQUIRED",
-            "message": "Rebuild is destructive to the vector index.",
+            "message": "Rebuild is destructive to the chroma.",
             "how_to_fix": "Re-call with confirm=true. SQLite Truth Store is NOT deleted.",
             "retry_safe": True,
         }
@@ -123,7 +123,7 @@ async def strata_rebuild_index(
             "status": "error",
             "error_code": "RESET_FAILED",
             "message": str(e),
-            "how_to_fix": "Ensure no other process is writing to the Chroma index, then retry.",
+            "how_to_fix": "Ensure no other process is writing to the chroma, then retry.",
             "retry_safe": True,
         }
 

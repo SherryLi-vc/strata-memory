@@ -65,14 +65,14 @@ from .pipeline.export_json import export_memories as pipeline_export
 from .pipeline.forget import forget_memories as pipeline_forget
 from .pipeline.recall import expand_memory_detail as pipeline_expand
 from .pipeline.recall import recall_context as pipeline_recall
-from .storage.chroma import ChromaStore
+from .storage.sqlite_vectors import SqliteVectorStore
 from .storage.truth_store import TruthStore
 
 # ── Global state ────────────────────────────────────────────────────────
 _config: Optional[Config] = None
 _embed_provider: Optional[EmbeddingProvider] = None
 _embed_sig: Optional[tuple] = None
-_chroma: Optional[ChromaStore] = None
+_chroma: Optional[SqliteVectorStore] = None
 _store: Optional[TruthStore] = None
 _auditor: Optional[AuditLogger] = None
 
@@ -164,7 +164,7 @@ def _ensure_embed_provider(config: Config) -> Optional[EmbeddingProvider]:
 def _get_state(
     *,
     require_embed: bool = False,
-) -> tuple[Config, TruthStore, Optional[EmbeddingProvider], Optional[ChromaStore], AuditLogger]:
+) -> tuple[Config, TruthStore, Optional[EmbeddingProvider], Optional[SqliteVectorStore], AuditLogger]:
     global _config, _embed_provider, _chroma, _store, _auditor
     if _config is None:
         _config = load_config()
@@ -186,7 +186,7 @@ def _get_state(
         embed = None
 
     if _chroma is None:
-        _chroma = ChromaStore(palace / "l2_vector")
+        _chroma = SqliteVectorStore(palace / "l2_vector")
     if _auditor is None:
         _auditor = AuditLogger(palace)
     return _config, _store, embed, _chroma, _auditor
@@ -860,7 +860,7 @@ async def _handle_commit(args: dict) -> dict:
         try:
             embed = _ensure_embed_provider(config)
         except ToolError as te:
-            # SoT write still proceeds; vector index skipped with explicit warning
+            # SoT write still proceeds; chroma skipped with explicit warning
             embed_warning = te.to_dict()
     required = ["user_id", "memory_type", "fact_claim", "confidence_score"]
     missing = [p for p in required if p not in args or args.get(p) in (None, "")]
@@ -1117,7 +1117,7 @@ def _onboarding_md() -> str:
 ## Architecture (read this)
 
 - **SQLite** = Single Source of Truth (`palace/truth/strata.db`)
-- **ChromaDB** = rebuildable vector companion (`palace/l2_vector/`)
+- **SQLite chroma** = rebuildable vector companion (`palace/l2_vector/`)
 - **Markdown** = read-only projection (`strata_project`)
 
 ## First-time setup
@@ -1160,7 +1160,7 @@ def _architecture_md() -> str:
 ```
 LLM ──commit_memory──► Quality Kernel ──► CBT Middleware ──► SQLite (SoT)
                                               │
-                                              └─► Chroma (companion, rebuildable)
+                                              └─► SQLite chroma (companion, rebuildable)
 
 LLM ──recall_context──► Hybrid RRF (vector+FTS) ──► {id,summary,score}
 LLM ──expand_memory_detail(id)──► full detail (scope-checked)

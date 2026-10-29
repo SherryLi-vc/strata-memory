@@ -16,7 +16,7 @@ from ..embedding import EmbeddingProvider
 from ..governance import CBTMiddleware, ToolError, success_payload
 from ..pipeline.lexical import fts_or_query, lexical_scores, squash_lexical
 from ..pipeline.scoring_signals import multi_signal_score
-from ..storage.chroma import ChromaStore
+from ..storage.sqlite_vectors import SqliteVectorStore
 from ..storage.truth_store import TruthStore
 
 _CANDIDATE_LIMIT = 300
@@ -61,7 +61,7 @@ async def recall_context(
     config: Config,
     store: TruthStore,
     embed_provider: Optional[EmbeddingProvider],
-    chroma: Optional[ChromaStore],
+    chroma: Optional[SqliteVectorStore],
     user_id: str,
     query: str,
     tenant_id: str = "",

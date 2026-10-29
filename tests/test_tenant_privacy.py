@@ -9,7 +9,7 @@ from pathlib import Path
 from strata_memory.config import Config, ensure_palace, save_config, truth_db_path
 from strata_memory.embedder_stamp import identity_dict, write_stamp
 from strata_memory.pipeline.recall import recall_context
-from strata_memory.storage.chroma import ChromaStore
+from strata_memory.storage.sqlite_vectors import SqliteVectorStore
 from strata_memory.storage.truth_store import TruthStore
 
 
@@ -31,7 +31,7 @@ def _setup(tmp_path: Path):
     )
     save_config(cfg)
     store = TruthStore(truth_db_path(palace))
-    chroma = ChromaStore(palace / "l2_vector")
+    chroma = SqliteVectorStore(palace / "l2_vector")
     ids = {}
     for tenant in ("", "t1", "t2"):
         row = store.insert_memory(

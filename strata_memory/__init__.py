@@ -1,6 +1,6 @@
 """Strata Memory 2.0 — Industrial AI Memory Base (MCP).
 
-SQLite Single Source of Truth · Rebuildable vector index · Markdown projection.
+SQLite Single Source of Truth · Rebuildable chroma · Markdown projection.
 LLM decides; deterministic code executes.
 """
 

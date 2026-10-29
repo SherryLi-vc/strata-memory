@@ -1,7 +1,7 @@
-"""Forget memories in scope and drop them from the rebuildable vector index.
+"""Forget memories in scope and drop them from the rebuildable chroma.
 
 SQLite is the source of truth. Rows are deleted, which fires the FTS5
-delete trigger. Chroma ids are removed in the same call. A later
+delete trigger. SQLite chroma ids are removed in the same call. A later
 ``strata_rebuild_index`` reads only active SQLite rows, so a deleted id
 cannot come back.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..governance import ToolError, success_payload
-from ..storage.chroma import ChromaStore
+from ..storage.sqlite_vectors import SqliteVectorStore
 from ..storage.truth_store import TruthStore
 
 
@@ -40,7 +40,7 @@ def forget_memories(
     include_chain: bool = True,
     limit: int = 2000,
     offset: int = 0,
-    chroma: Optional[ChromaStore] = None,
+    chroma: Optional[SqliteVectorStore] = None,
 ) -> dict[str, Any]:
     if not user_id or not str(user_id).strip():
         raise ToolError(

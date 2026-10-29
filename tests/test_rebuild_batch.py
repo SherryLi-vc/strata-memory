@@ -1,4 +1,4 @@
-"""Rebuild must embed and write in batches, not one Chroma upsert per row."""
+"""Rebuild must embed and write in batches, not one SQLite chroma upsert per row."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from strata_memory.config import Config, ensure_palace, save_config, truth_db_path
 from strata_memory.ops.rebuild import strata_rebuild_index
-from strata_memory.storage.chroma import ChromaStore
+from strata_memory.storage.sqlite_vectors import SqliteVectorStore
 from strata_memory.storage.truth_store import TruthStore
 
 
@@ -30,7 +30,7 @@ class _CountingEmbed:
         return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
 
 
-class _CountingChroma(ChromaStore):
+class _CountingChroma(SqliteVectorStore):
     def __init__(self, persist_dir: Path):
         super().__init__(persist_dir)
         self.add_calls = 0

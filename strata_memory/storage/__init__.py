@@ -1,1 +1,1 @@
-"""Storage layer: Markdown filesystem + ChromaDB + SQLite KG (V2)."""
+"""Storage layer: Markdown filesystem + SQLite truth and vector indexes."""

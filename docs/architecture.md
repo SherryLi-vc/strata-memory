@@ -15,7 +15,7 @@ palace/
 ├── config.json                 # mode, budgets, embedding (no full api_key)
 ├── truth/
 │   └── strata.db               # SoT: memories, audit_log, trajectory, FTS5
-├── l2_vector/                  # Chroma companion (deletable)
+├── l2_vector/                  # SQLite vector companion (rebuildable)
 ├── projection/                 # read-only Markdown dump
 ├── audit_logs/                 # optional human Markdown audit
 └── system/
@@ -43,7 +43,7 @@ commit_memory
   → CBTMiddleware.assess (distortions + redaction)
   → TruthStore.find_by_hash (dedup → touch)
   → TruthStore.insert_memory (TTL/layer deterministic)
-  → embed + Chroma.upsert (best-effort; failure does not roll back SoT)
+  → embed + SQLite vector upsert (best-effort; failure does not roll back SoT)
   → audit + trajectory
 ```
 

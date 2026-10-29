@@ -9,7 +9,7 @@
 
 Markdown 降级为“只读投影” (Read-Only Projection)：Markdown 不再是数据库，而是由 SQLite 动态生成的“视图（View）”。通过 MCP 的 Resources 接口暴露给 LLM 或人类查看。人类在界面的修改，必须通过 Git-diff 风格的解析器反向写入 SQLite。
 
-重建级容灾 (Rebuildable Companion)：ChromaDB/BGE-M3 向量库和知识图谱被降级为“可随时销毁重建的索引层”。当遭遇污染时，系统可以一键从 SQLite 原生记录全量重建向量。
+重建级容灾 (Rebuildable Companion)：SQLite/BGE-M3 向量索引和知识图谱被设计为“可随时销毁重建的索引层”。当遭遇污染时，系统可以一键从 SQLite 原生记录全量重建向量。
 
 第二战役：防弹写入与质量门 (Write-Time Governance & Bulletproof Schema)
 痛点：缺乏写入干预，LLM 的幻觉和垃圾信息会直接污染记忆库。

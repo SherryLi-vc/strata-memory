@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..config import Config
-from ..storage.chroma import ChromaStore
+from ..storage.sqlite_vectors import SqliteVectorStore
 from ..storage.truth_store import TruthStore
 
 
@@ -13,7 +13,7 @@ def strata_stats(
     *,
     config: Config,
     store: TruthStore,
-    chroma: Optional[ChromaStore] = None,
+    chroma: Optional[SqliteVectorStore] = None,
     user_id: str = "",
 ) -> dict[str, Any]:
     st = store.stats()

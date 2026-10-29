@@ -15,7 +15,7 @@ from strata_memory.pipeline.commit import commit_memory
 from strata_memory.pipeline.export_json import EXPORT_FORMAT, export_memories
 from strata_memory.pipeline.forget import forget_memories
 from strata_memory.pipeline.recall import recall_context
-from strata_memory.storage.chroma import ChromaStore
+from strata_memory.storage.sqlite_vectors import SqliteVectorStore
 from strata_memory.storage.truth_store import TruthStore
 
 
@@ -31,7 +31,7 @@ def env(tmp_path: Path):
     )
     save_config(cfg)
     store = TruthStore(truth_db_path(palace))
-    chroma = ChromaStore(palace / "l2_vector")
+    chroma = SqliteVectorStore(palace / "l2_vector")
     return cfg, store, chroma
 
 

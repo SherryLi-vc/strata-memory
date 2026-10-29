@@ -170,7 +170,7 @@ A `config.json` that already names `siliconflow` keeps that provider. Set `STRAT
 ## FAQ
 
 **Where do memories live?**  
-SQLite under `STRATA_PALACE` (default `~/.strata/palace`). Chroma is a rebuildable index. Markdown from `strata_project` is a read-only view.
+SQLite under `STRATA_PALACE` (default `~/.strata/palace`) stores the source of truth and rebuildable vector index. Markdown from `strata_project` is a read-only view.
 
 **Does this phone home?**  
 Not with the default `local` provider. A cloud provider or a non-loopback `STRATA_EMBEDDING_BASE_URL` receives memory text and queries.

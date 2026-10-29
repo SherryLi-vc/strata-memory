@@ -4,7 +4,7 @@ description: Installs and operates strata-memory, an open-source MCP memory serv
 summary: Free integration skill for strata-memory, an open-source MCP memory hub. Your agent installs and connects the server, stores vetted facts in a local SQLite source of truth, and recalls them with a search-then-expand flow instead of flooding the context window.
 version: 1.0.0
 tags: [mcp, memory, agent-memory, persistent-memory, long-term-memory, multi-agent, sqlite, vector-search, rag, claude-code, cursor, claude-desktop, hermes, open-source]
-keywords: [mcp memory server, persistent context, agent memory, shared memory, progressive recall, hybrid search, chromadb, bge-m3]
+keywords: [mcp memory server, persistent context, agent memory, shared memory, progressive recall, hybrid search, sqlite vectors, bge-m3]
 use_cases:
   - Give a coding agent memory of user preferences and project decisions across sessions
   - Share durable facts between several agents through one MCP server

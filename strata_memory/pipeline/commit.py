@@ -18,7 +18,7 @@ from ..embedder_stamp import identity_for, mismatch_fix, mismatch_message, write
 from ..embedding import EmbeddingProvider
 from ..governance import CBTMiddleware, QualityKernel, ToolError, success_payload
 from ..governance.secrets import redact_secrets
-from ..storage.chroma import ChromaStore
+from ..storage.sqlite_vectors import SqliteVectorStore
 from ..storage.truth_store import TruthStore
 
 
@@ -27,7 +27,7 @@ async def commit_memory(
     config: Config,
     store: TruthStore,
     embed_provider: Optional[EmbeddingProvider],
-    chroma: Optional[ChromaStore],
+    chroma: Optional[SqliteVectorStore],
     user_id: str,
     memory_type: str,
     fact_claim: str,
@@ -299,7 +299,7 @@ async def promote_session(
     store: TruthStore,
     config: Config,
     embed_provider: Optional[EmbeddingProvider],
-    chroma: Optional[ChromaStore],
+    chroma: Optional[SqliteVectorStore],
     user_id: str,
     session_id: str,
     tenant_id: str = "",
