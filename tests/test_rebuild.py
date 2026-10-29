@@ -18,9 +18,15 @@ class _HashEmbed:
     async def embed(self, text: str) -> list[float]:
         return [0.1, 0.2, 0.3, 0.4]
 
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
+
 
 class _FailingEmbed(_HashEmbed):
     async def embed(self, text: str) -> list[float]:
+        raise RuntimeError("embedding unavailable")
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         raise RuntimeError("embedding unavailable")
 
 

@@ -7,6 +7,7 @@
 - Tool count is 13 everywhere (README, README.zh-CN, SKILL.md, DEVELOPMENT.md); a test checks the docs against the tools the server registers.
 
 ### Vector index
+- `strata_rebuild_index` embeds eligible rows and writes vectors in batches of up to 128, with per-row fallback for a failed batch.
 - `strata_rebuild_index(tenant_id=...)` deletes and re-adds only that tenant's vectors. It used to reset the whole collection and re-add one tenant, dropping every other tenant's vectors while returning ok. An unstamped or mismatched index escalates a tenant-scoped call to a full rebuild (`scope: "all"`).
 - `strata_doctor` reports `status: "degraded"` whenever it lists an issue, warnings included, so `healthy: false` never comes with `status: "ok"`. A new `severity` field (`none`, `warn`, `error`) keeps the distinction.
 - `strata_doctor` checks vector coverage by id (`vector_coverage`, `INDEX_INCOMPLETE`). After a failed or interrupted rebuild it reports `degraded` instead of healthy.
