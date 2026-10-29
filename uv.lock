@@ -2776,7 +2776,7 @@ wheels = [
 
 [[package]]
 name = "strata-memory-mcp"
-version = "2.1.0"
+version = "2.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
@@ -2807,7 +2807,7 @@ requires-dist = [
     { name = "chromadb", specifier = ">=0.5.0" },
     { name = "fastembed", marker = "extra == 'local'", specifier = ">=0.4.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "mcp", specifier = ">=1.0.0" },
+    { name = "mcp", specifier = ">=1.0.0,<2" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "psycopg2-binary", marker = "extra == 'enterprise'", specifier = ">=2.9" },
     { name = "pydantic", specifier = ">=2.0.0" },

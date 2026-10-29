@@ -6,8 +6,8 @@
 #   STRATA_API_KEY=<full key for the chosen endpoint>
 #   STRATA_DIR=/absolute/path/to/strata-memory
 #   STRATA_PALACE=~/.strata/palace
-# Optional (default SiliconFlow BAAI/bge-m3). The configured endpoint receives memory text
-# unless STRATA_EMBEDDING_PROVIDER=local:
+# Optional. The default provider is local and needs no key. The configured endpoint
+# receives memory text unless STRATA_EMBEDDING_PROVIDER=local:
 #   STRATA_EMBEDDING_PROVIDER=siliconflow
 #   STRATA_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
 #   STRATA_EMBEDDING_MODEL=BAAI/bge-m3

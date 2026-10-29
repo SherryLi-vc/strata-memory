@@ -6,9 +6,11 @@
 #   chmod +x ~/.hermes/scripts/strata-wrapper.sh
 #
 # Set these yourself (environment or ~/.hermes/.env). Do not paste keys into chat.
-#   STRATA_API_KEY=<full SiliconFlow key>
 #   STRATA_DIR=/absolute/path/to/strata-memory
 # Optional: STRATA_PALACE=~/.strata/palace
+# Do not export STRATA_EMBEDDING_PROVIDER here. An env value overrides
+# config.json and would retarget an existing palace. The server default
+# applies only when the palace has no provider saved.
 #
 # Key order: STRATA_API_KEY, SILICONFLOW_API_KEY (env, then ~/.hermes/.env),
 # then ~/.strata/api_key, then a non-redacted sk- token in ~/.openclaw/openclaw.json.
@@ -125,9 +127,9 @@ fi
 if [ -z "$RESOLVED" ]; then
   _provider="${STRATA_EMBEDDING_PROVIDER:-}"
   _base="${STRATA_EMBEDDING_BASE_URL:-}"
-  if [ "$_provider" = "local" ] || [ "$_provider" = "local_onnx" ] \
+  if [ -z "$_provider" ] || [ "$_provider" = "local" ] || [ "$_provider" = "local_onnx" ] \
     || [[ "$_base" == *localhost* || "$_base" == *127.0.0.1* || "$_base" == *"[::1]"* ]]; then
-    echo "[STRATA-WRAP] no API key (not required for provider=${_provider:-openai_compatible} base=${_base:-local})" >&2
+    echo "[STRATA-WRAP] no API key (not required when provider is unset or local, base=${_base:-})" >&2
   else
     echo "[STRATA-WRAP] ERROR: no usable API key. Add STRATA_API_KEY or STRATA_EMBEDDING_API_KEY to ~/.hermes/.env" >&2
   fi

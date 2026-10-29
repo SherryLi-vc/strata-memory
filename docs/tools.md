@@ -24,7 +24,7 @@ Initialize palace, SQLite SoT, config.
 
 Embedding provider, model, base URL, and dimension come from the environment when the tool arguments are omitted:
 
-- `STRATA_EMBEDDING_PROVIDER` — `siliconflow` (default), `openai`, `openai_compatible`, or `local`
+- `STRATA_EMBEDDING_PROVIDER` — `local` (default, no API key), `siliconflow`, `openai`, or `openai_compatible`
 - `STRATA_EMBEDDING_BASE_URL` — OpenAI-compatible embeddings root. SiliconFlow default `https://api.siliconflow.cn/v1`
 - `STRATA_EMBEDDING_MODEL` — SiliconFlow default `BAAI/bge-m3`; local default `sentence-transformers/all-MiniLM-L6-v2`
 - `STRATA_EMBEDDING_DIMENSION` — default `384` (bge-m3 is truncated to this). OpenAI `text-embedding-3-small` defaults to `1536` when that provider is selected
@@ -66,7 +66,9 @@ Success:
 }
 ```
 
-Common errors: `SECRET_DETECTED`, `FUZZY_TIME`, `SPECULATION_AS_TRUTH`, `CLAIM_TOO_SHORT`, `LOW_CONFIDENCE` (→ scratch).
+Secrets: with the default `on_secret: "redact"` a detected secret is replaced by `[redacted:<kind>]` before the row is stored or embedded, and the response carries `secrets_redacted` (kind → count; empty when nothing was masked). With `on_secret: "reject"` (config or `STRATA_ON_SECRET`) the write fails with `SECRET_DETECTED`.
+
+Common errors: `SECRET_DETECTED` (only with `on_secret: "reject"`), `FUZZY_TIME`, `SPECULATION_AS_TRUTH`, `CLAIM_TOO_SHORT`, `LOW_CONFIDENCE` (→ scratch).
 
 ---
 
@@ -85,9 +87,12 @@ Common errors: `SECRET_DETECTED`, `FUZZY_TIME`, `SPECULATION_AS_TRUTH`, `CLAIM_T
   "user_id": "user_001",
   "query": "coding IDE preferences",
   "context_depth": "deep",
-  "limit": 8
+  "limit": 8,
+  "include_l0": true
 }
 ```
+
+`limit` caps the merged list. L0 is ranked with the other tiers. `include_l0: false` omits L0.
 
 Response shape:
 
@@ -100,13 +105,23 @@ Response shape:
       "summary": "User prefers dark mode...",
       "memory_type": "user_preference",
       "layer": "L0",
-      "score": 1.0
+      "score": 0.62,
+      "summary_truncated": false
     }
   ],
   "token_estimate": 120,
+  "truncated": false,
+  "truncation": {
+    "scan_limit": 300,
+    "scan_limit_reached": false,
+    "token_waterline_dropped": 0,
+    "summaries_truncated": 0
+  },
   "note": "Call expand_memory_detail for full text."
 }
 ```
+
+A summary that was cut short ends with ` …[truncated]` and has `summary_truncated: true`; `expand_memory_detail` returns the full text. `truncated` is true when any summary was cut, when the token budget dropped cards (`token_waterline_dropped`), or when the scan reached the newest `scan_limit` active rows, so older rows were not considered.
 
 ---
 
@@ -122,7 +137,7 @@ Response shape:
 
 ## strata_doctor
 
-No params. Returns checks + issues + recommendation.
+No params. Returns checks + issues + recommendation. `status` is `ok` only when there are no issues, otherwise `degraded`; `severity` is `none`, `warn` or `error`; `healthy` is true only with no issues.
 
 ---
 
@@ -181,6 +196,8 @@ Default `dry_run=true`. Set `dry_run=false` to archive expired rows. Do not past
 | promote_session | user_id, session_id | SoT + vector |
 | recall_context | user_id, query | Read + usage_count++ |
 | expand_memory_detail | user_id, memory_id | Read + usage_count++ |
+| forget_memory | user_id, and id or filter | Deletes SQLite + vector ids. Filter needs confirm=true |
+| export_memories | user_id | Read JSON |
 | strata_doctor | — | Read |
 | strata_rebuild_index | confirm=true | Wipes vectors only |
 | strata_stats | — | Read |

@@ -38,13 +38,21 @@ def multi_signal_score(
     max_rrf: float = 1.0,
     now: Optional[datetime] = None,
     half_life_days: float = 30.0,
+    relevance: Optional[float] = None,
 ) -> tuple[float, dict[str, float]]:
-    """Return (final_score, breakdown)."""
+    """Return (final_score, breakdown).
+
+    ``relevance`` overrides batch-max RRF normalization. RRF with k=60
+    collapses nearby ranks, so callers that already have a lexical or
+    vector similarity in ``[0, 1]`` should pass it here.
+    """
     now = now or datetime.now(timezone.utc)
 
-    # Relevance from RRF (normalize by batch max)
-    denom = max(max_rrf, 1e-9)
-    relevance = max(0.0, min(1.0, float(rrf_score) / denom))
+    if relevance is None:
+        denom = max(max_rrf, 1e-9)
+        relevance = max(0.0, min(1.0, float(rrf_score) / denom))
+    else:
+        relevance = max(0.0, min(1.0, float(relevance)))
 
     # Recency: exponential decay on last_accessed or created_at
     anchor = row.get("last_accessed") or row.get("created_at")

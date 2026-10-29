@@ -7,14 +7,14 @@ git clone https://github.com/SherryLi-vc/strata-memory.git
 cd strata-memory
 uv sync --extra dev
 uv run pytest -v
-uv run strata-memory-mcp
+uv run strata-memory
 ```
 
 ## Package layout
 
 ```
 strata_memory/
-├── server.py                 # MCP surface (11 tools)
+├── server.py                 # MCP surface (13 tools)
 ├── config.py                 # Config + palace paths + truth_db_path
 ├── governance/
 │   ├── quality_kernel.py     # Write-time validation / dedup hash / TTL
@@ -76,3 +76,26 @@ uv run pytest -v
 ```
 
 Core coverage: Quality Kernel, Truth Store, commit/recall/expand, ops.
+
+## Releasing
+
+One version lives in `pyproject.toml` and `strata_memory/__init__.py`; `tests/test_version_consistency.py` and `scripts/check_release_version.py` fail when they, the CHANGELOG top entry, the skill metadata, or a release tag disagree.
+
+Publishing uses PyPI Trusted Publishing (OIDC) from `.github/workflows/release.yml`. The repository holds no PyPI token.
+
+One-time setup (maintainer account, not done by CI):
+
+| Field | pypi.org (`/manage/account/publishing/`) | test.pypi.org (`/manage/account/publishing/`) |
+|---|---|---|
+| PyPI Project Name | `strata-memory-mcp` | `strata-memory-mcp` |
+| Owner | `SherryLi-vc` | `SherryLi-vc` |
+| Repository name | `strata-memory` | `strata-memory` |
+| Workflow name | `release.yml` | `release.yml` |
+| Environment name | `pypi` | `testpypi` |
+
+Then in GitHub → Settings → Environments create `testpypi` and `pypi`; give `pypi` required reviewers and limit it to tags `v*`.
+
+Flow:
+
+1. Actions → Release → Run workflow. It builds `<version>.dev<run_number>`, checks metadata, smoke-tests the wheel, and publishes to TestPyPI only. Verify with `uvx --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ strata-memory-mcp==<version>.dev<run_number> --help`.
+2. Publish a GitHub release with tag `v<version>` (for example `v2.2.1`). The build job rejects a tag that does not match `pyproject.toml`; the `pypi` job then waits for environment approval and publishes.

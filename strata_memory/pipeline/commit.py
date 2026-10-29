@@ -14,8 +14,10 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..config import Config
+from ..embedder_stamp import identity_for, mismatch_fix, mismatch_message, write_compatibility, write_stamp
 from ..embedding import EmbeddingProvider
 from ..governance import CBTMiddleware, QualityKernel, ToolError, success_payload
+from ..governance.secrets import redact_secrets
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
 
@@ -50,6 +52,11 @@ async def commit_memory(
         )
 
     tenant_id = tenant_id or config.tenant_id or ""
+    # Secrets: mask them before anything is validated, hashed, stored, embedded or audited,
+    # unless on_secret=reject, in which case the Quality Kernel refuses the write below.
+    secrets_redacted: dict[str, int] = {}
+    if getattr(config, "on_secret", "redact") == "redact":
+        fact_claim, secrets_redacted = redact_secrets(fact_claim)
     kernel = QualityKernel(min_confidence=getattr(config, "min_confidence", 0.4))
     verdict = kernel.validate(
         memory_type=memory_type,
@@ -91,6 +98,7 @@ async def commit_memory(
                 "usage_count": existing["usage_count"] + 1,
                 "validator_kind": meta.get("validator_kind"),
                 "ttl_days": meta.get("ttl_days"),
+                "secrets_redacted": secrets_redacted,
             },
             message="Duplicate memory — usage_count incremented, no new row.",
         )
@@ -174,10 +182,16 @@ async def commit_memory(
         pass
 
     indexed = False
+    index_error = ""
     if not force_scratch and embed_provider is not None and chroma is not None and not assessment.is_negative_schema:
         try:
             text = f"[{user_id}/{room}] {claim[:2000]}"
             vec = await embed_provider.embed(text)
+            ident = identity_for(config.embedding, embed_provider)
+            problem, needs_stamp = write_compatibility(chroma.persist_dir, ident, chroma.count)
+            if problem:
+                index_error = problem
+                raise RuntimeError(f"{problem}: {mismatch_message(problem, ident)} {mismatch_fix()}")
             chroma.add(
                 documents=[text],
                 metadatas=[
@@ -203,6 +217,8 @@ async def commit_memory(
                 embeddings=[vec],
             )
             indexed = True
+            if needs_stamp:
+                write_stamp(chroma.persist_dir, ident)
             # Drop superseded vector companion if present
             if supersedes_id:
                 try:
@@ -229,6 +245,8 @@ async def commit_memory(
     )
 
     msg = "Memory committed to Truth Store (SQLite)."
+    if secrets_redacted:
+        msg += f" Masked {sum(secrets_redacted.values())} secret(s) before storing."
     if supersedes_id:
         msg += f" Superseded prior memory {supersedes_id} (version chain)."
     if assessment.is_negative_schema:
@@ -249,6 +267,7 @@ async def commit_memory(
             "cooling_hours": config.cbt.cooling_hours if assessment.is_negative_schema else 0,
             "ttl_seconds": verdict.ttl_seconds,
             "ttl_days": meta.get("ttl_days"),
+            "secrets_redacted": secrets_redacted,
             "memory_status": meta.get("status", "active"),
             "validator_kind": meta.get("validator_kind"),
             "authority": authority or meta.get("authority"),
@@ -256,6 +275,7 @@ async def commit_memory(
             "entity": entity or None,
             "confidence": verdict.confidence,
             "indexed": indexed,
+            "index_error": index_error or None,
             "summary": row.get("summary") or claim[:240],
             "cbt_hint": assessment.reframed_hint or None,
             "provenance": prov,

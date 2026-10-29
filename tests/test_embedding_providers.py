@@ -28,6 +28,8 @@ _EMBED_ENV = (
     "STRATA_API_KEY",
     "SILICONFLOW_API_KEY",
     "OPENAI_API_KEY",
+    "STRATA_LOCAL_EMBED_BACKEND",
+    "STRATA_EMBEDDING_HASH_FALLBACK",
 )
 
 
@@ -38,12 +40,56 @@ def clean_embed_env(monkeypatch):
     return monkeypatch
 
 
-def test_defaults_are_siliconflow(clean_embed_env):
+def test_defaults_are_local(clean_embed_env):
+    settings = resolve_embedding_settings(EmbeddingConfig())
+    assert settings.provider == "local"
+    assert settings.model == "sentence-transformers/all-MiniLM-L6-v2"
+    assert settings.base_url == ""
+    assert settings.dimension == 384
+    assert not embedding_requires_api_key(settings.provider, settings.base_url)
+
+
+def test_provider_only_saved_config_uses_that_providers_defaults(tmp_path, clean_embed_env):
+    from strata_memory.config import load_config
+
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    (palace / "config.json").write_text(
+        json.dumps({"version": "2.1.0", "embedding": {"provider": "siliconflow"}}),
+        encoding="utf-8",
+    )
+    cfg = load_config(str(palace))
+    assert cfg.embedding.provider == "siliconflow"
+    assert cfg.embedding.model == "BAAI/bge-m3"
+    assert cfg.embedding.base_url == "https://api.siliconflow.cn/v1"
+    assert cfg.embedding.dimension == 384
+
+
+def test_palace_without_embedding_block_stays_on_siliconflow(tmp_path, clean_embed_env):
+    from strata_memory.config import load_config
+
+    palace = tmp_path / "palace"
+    palace.mkdir()
+    (palace / "config.json").write_text(json.dumps({"version": "2.1.0", "mode": "personal"}), encoding="utf-8")
+    cfg = load_config(str(palace))
+    assert cfg.embedding.provider == "siliconflow"
+    assert cfg.embedding.model == "BAAI/bge-m3"
+
+
+def test_missing_config_file_defaults_to_local(tmp_path, clean_embed_env):
+    from strata_memory.config import load_config
+
+    cfg = load_config(str(tmp_path / "new-palace"))
+    assert cfg.embedding.provider == "local"
+    assert cfg.embedding.model == "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def test_env_can_still_select_siliconflow(clean_embed_env):
+    clean_embed_env.setenv("STRATA_EMBEDDING_PROVIDER", "siliconflow")
     settings = resolve_embedding_settings(EmbeddingConfig())
     assert settings.provider == "siliconflow"
     assert settings.model == "BAAI/bge-m3"
     assert settings.base_url == "https://api.siliconflow.cn/v1"
-    assert settings.dimension == 384
     assert embedding_requires_api_key(settings.provider, settings.base_url)
 
 
@@ -197,8 +243,29 @@ def test_factory_routes_providers(clean_embed_env):
     assert not isinstance(other, BGE3SiliconFlowProvider)
 
 
-@pytest.mark.asyncio
-async def test_local_without_extra_explains_how_to_install(clean_embed_env):
+def test_semantic_load_failure_names_the_hash_opt_in(clean_embed_env):
     provider = LocalEmbeddingProvider(model="sentence-transformers/all-MiniLM-L6-v2", dimension=384)
-    with pytest.raises(RuntimeError, match="uv sync --extra local"):
-        await provider.embed("stays on device")
+    with pytest.raises(RuntimeError, match="STRATA_LOCAL_EMBED_BACKEND=hash"):
+        provider._semantic_failed(TimeoutError("download timed out"), "fastembed")
+
+
+@pytest.mark.asyncio
+async def test_hash_backend_env_skips_semantic_load(clean_embed_env):
+    clean_embed_env.setenv("STRATA_LOCAL_EMBED_BACKEND", "hash")
+    provider = LocalEmbeddingProvider(model="sentence-transformers/all-MiniLM-L6-v2", dimension=384)
+    vec = await provider.embed("offline")
+    assert provider.backend == "hashing"
+    assert len(vec) == 384
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_local_without_extra_uses_hashing_embedder(clean_embed_env):
+    provider = LocalEmbeddingProvider(model="sentence-transformers/all-MiniLM-L6-v2", dimension=384)
+    vec = await provider.embed("stays on device")
+    assert provider._backend == "hashing"
+    assert len(vec) == 384
+    assert abs(sum(v * v for v in vec) - 1.0) < 1e-6
+    assert vec == await provider.embed("stays on device")
+    assert "uv sync --extra local" in provider.install_hint
+    await provider.close()

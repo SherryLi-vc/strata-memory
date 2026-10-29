@@ -6,12 +6,12 @@
 #   STRATA_API_KEY=<full key for the chosen endpoint>
 #   STRATA_DIR=/absolute/path/to/strata-memory
 #   STRATA_PALACE=~/.strata/palace
-# Optional embedding override (default is SiliconFlow BAAI/bge-m3):
+# Embedding defaults to local (no API key). Optional cloud override:
 #   STRATA_EMBEDDING_PROVIDER=siliconflow
 #   STRATA_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
 #   STRATA_EMBEDDING_MODEL=BAAI/bge-m3
 #   STRATA_EMBEDDING_DIMENSION=384
-# local in-process: STRATA_EMBEDDING_PROVIDER=local (no key; uv sync --extra local)
+# Semantic local model: STRATA_EMBEDDING_PROVIDER=local and uv sync --extra local
 # any OpenAI-compatible server, including loopback:
 #   STRATA_EMBEDDING_PROVIDER=openai_compatible
 #   STRATA_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .errors import ToolError
+from .secrets import SECRET_RULES, contains_secret
 from .type_defaults import MEMORY_TYPES, defaults_for
 
 VALID_MEMORY_TYPES = MEMORY_TYPES
@@ -31,16 +32,9 @@ FUZZY_TIME_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# Credential / secret patterns — hard reject (never store).
-SECRET_PATTERNS = [
-    re.compile(r"(?i)(api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*\S+"),
-    re.compile(r"(?i)(password|passwd|pwd)\s*[:=]\s*\S+"),
-    re.compile(r"(?i)(password|passwd|pwd)\s+is\s+\S+"),
-    re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),
-    re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),
-    re.compile(r"\b-----BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY-----"),
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"),
-]
+# Credential / secret patterns. The rules live in governance/secrets.py; this
+# list stays for callers that scan text (hygiene, doctor, migrate).
+SECRET_PATTERNS = [rule.pattern for rule in SECRET_RULES]
 
 # Speculative / non-fact language that should not be written as truth.
 SPECULATION_PATTERNS = re.compile(
@@ -158,16 +152,16 @@ class QualityKernel:
                 fix="Clamp to [0.1, 1.0]. Low certainty → do not commit durable truth.",
             )
 
-        for pat in SECRET_PATTERNS:
-            if pat.search(claim):
-                return QualityVerdict(
-                    accepted=False,
-                    reject_code="SECRET_DETECTED",
-                    reject_message="fact_claim appears to contain credentials or secrets.",
-                    fix="Redact secrets. Store only non-sensitive facts "
-                    "(e.g. 'User uses SiliconFlow for embeddings' — never the key).",
-                    metadata={"retry_safe": False},
-                )
+        if contains_secret(claim):
+            return QualityVerdict(
+                accepted=False,
+                reject_code="SECRET_DETECTED",
+                reject_message="fact_claim appears to contain credentials or secrets.",
+                fix="Remove the secret, or set on_secret=redact to store it with the secret masked. "
+                "Store only non-sensitive facts "
+                "(e.g. 'User uses SiliconFlow for embeddings' — never the key).",
+                metadata={"retry_safe": False},
+            )
 
         if EMOTION_ONLY_PATTERNS.match(claim):
             return QualityVerdict(

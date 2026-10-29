@@ -1,35 +1,114 @@
-name: Release to PyPI
+name: Release
+
+# Trusted Publishing (OIDC). No API token is stored in this repository.
+# https://docs.pypi.org/trusted-publishers/
+#
+# - Manual run (Actions -> Release -> Run workflow): build, then publish to TestPyPI
+#   (GitHub environment `testpypi`). Each run uploads <version>.dev<run_number> so it
+#   can be repeated without burning the real version number.
+# - GitHub release published (tag vX.Y.Z matching pyproject): build, then publish to
+#   PyPI (GitHub environment `pypi`). Add required reviewers to that environment.
+#
+# Pending publishers to register (owner SherryLi-vc, repo strata-memory, workflow release.yml):
+#   pypi.org      project strata-memory-mcp, environment pypi
+#   test.pypi.org project strata-memory-mcp, environment testpypi
 
 on:
   release:
     types: [published]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build-and-publish:
+  build:
+    name: Build distributions
     runs-on: ubuntu-latest
-
-    permissions:
-      id-token: write
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
         with:
-          version: "latest"
+          version: "0.13.6"
 
       - name: Set up Python
-        run: uv python install 3.11
+        run: uv python install 3.12
 
-      - name: Install dependencies
-        run: uv sync
+      - name: Check version consistency
+        env:
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+        run: uv run --no-project python scripts/check_release_version.py "$TAG"
 
-      - name: Build package
+      - name: Use a dev version for TestPyPI runs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          base=$(uv run --no-project python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          dev="${base}.dev${RUN_NUMBER}"
+          sed -i "s/^version = \"${base}\"/version = \"${dev}\"/" pyproject.toml
+          sed -i "s/^__version__ = \"${base}\"/__version__ = \"${dev}\"/" strata_memory/__init__.py
+          grep -q "^version = \"${dev}\"" pyproject.toml
+          echo "Building ${dev} for TestPyPI"
+
+      - name: Build
         run: uv build
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Check metadata
+        run: uvx twine check --strict dist/*
+
+      - name: Smoke-test the wheel
+        run: |
+          uv venv /tmp/smoke -p 3.12
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/strata-memory-mcp --help > /dev/null
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          skip-existing: true
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/strata-memory-mcp
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3 (release/v1)
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/strata-memory-mcp
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3 (release/v1)

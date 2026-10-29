@@ -12,11 +12,11 @@ use_cases:
   - Recall relevant memories as short cards, then expand only the ones that matter
 docs_url: https://github.com/SherryLi-vc/strata-memory
 license: MIT
-compatibility: Requires an MCP host (Claude Code, Cursor, Claude Desktop, or Hermes), Python 3.11+, uv, and git. Embeddings default to SiliconFlow (BAAI/bge-m3) via STRATA_API_KEY. Set STRATA_EMBEDDING_PROVIDER, STRATA_EMBEDDING_BASE_URL, and STRATA_EMBEDDING_MODEL for a local model or any OpenAI-compatible endpoint. Memories stay under STRATA_PALACE. The configured embedding endpoint receives memory text and recall queries unless the provider is local.
+compatibility: Requires an MCP host (Claude Code, Cursor, Claude Desktop, or Hermes), Python 3.11+, and uv. Embeddings default to an offline local provider with no API key. Set STRATA_EMBEDDING_PROVIDER to siliconflow or openai_compatible to use a remote endpoint. Memories stay under STRATA_PALACE. The configured embedding endpoint receives memory text and recall queries unless the provider is local.
 metadata:
   author: Vincy Zhang
   open_source: https://github.com/SherryLi-vc/strata-memory
-  server_version: "2.1.0"
+  server_version: "2.2.1"
   free: "true"
 ---
 
@@ -24,7 +24,7 @@ metadata:
 
 ## Purpose
 
-strata-memory is an open-source MCP memory server (v2.1.0, MIT) for one agent or several agents sharing a palace.
+strata-memory is an open-source MCP memory server (v2.2.1, MIT) for one agent or several agents sharing a palace.
 
 - SQLite is the single source of truth (memories, audit, trajectories).
 - Chroma is a companion vector index. Rebuild it from SQLite; do not treat it as authoritative.
@@ -34,7 +34,7 @@ strata-memory is an open-source MCP memory server (v2.1.0, MIT) for one agent or
 
 Repository: https://github.com/SherryLi-vc/strata-memory
 
-This skill does not bundle the server. Install it from that repository. The `strata-memory-mcp` package is not on PyPI, so do not use `uvx`.
+This skill does not bundle the server. The distribution name is `strata-memory-mcp`. Do not run `uvx strata-memory`; that name on PyPI is a different package. Install from git: `uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp`. PyPI install (`uvx strata-memory-mcp`) is coming soon. Semantic weights: `uvx --from 'strata-memory-mcp[local] @ git+https://github.com/SherryLi-vc/strata-memory' strata-memory-mcp`.
 
 ## When to Use
 
@@ -56,7 +56,8 @@ Tell the user this before the first write or recall:
 
 - Rows live under `STRATA_PALACE` (default `~/.strata/palace`).
 - The configured embedding endpoint receives memory text and recall queries (`commit_memory`, `promote_session`, `recall_context`, and index rebuild), unless the provider is `local`.
-- Default option is SiliconFlow: provider `siliconflow`, model `BAAI/bge-m3`, base URL `https://api.siliconflow.cn/v1`. That model returns 1024 dimensions and is truncated to `STRATA_EMBEDDING_DIMENSION` (default 384).
+- Default is `local`: no API key, text stays on the machine. Without the `local` extra the server uses a hashing embedder. `uvx --from 'strata-memory-mcp[local] @ git+https://github.com/SherryLi-vc/strata-memory' strata-memory-mcp` (or `uv sync --extra local` in a clone) uses `sentence-transformers/all-MiniLM-L6-v2`. The first run downloads weights and needs a network. Offline, set `STRATA_LOCAL_EMBED_BACKEND=hash` instead of waiting on that download. A changed embedder must be rebuilt; the index refuses mixed vectors.
+- Optional cloud: provider `siliconflow`, model `BAAI/bge-m3`, base URL `https://api.siliconflow.cn/v1`. That model returns 1024 dimensions and is truncated to `STRATA_EMBEDDING_DIMENSION` (default 384). A saved `config.json` that already names `siliconflow` keeps that provider.
 - `STRATA_EMBEDDING_PROVIDER=openai` or `openai_compatible` calls any OpenAI-compatible `POST /embeddings` endpoint. Set `STRATA_EMBEDDING_BASE_URL` and `STRATA_EMBEDDING_MODEL`. The vector length must equal `STRATA_EMBEDDING_DIMENSION` (OpenAI `text-embedding-3-small` uses 1536 when that provider is selected). Then rebuild the index.
 - `STRATA_EMBEDDING_PROVIDER=local` runs an in-process model (default `sentence-transformers/all-MiniLM-L6-v2`, 384 dimensions). Install with `uv sync --extra local`. Text stays on the machine.
 - A local server (Ollama, llama.cpp, TEI, vLLM) is `openai_compatible` with a loopback `STRATA_EMBEDDING_BASE_URL` such as `http://127.0.0.1:11434/v1`. Loopback does not require an API key. Text is sent to that URL.
@@ -80,19 +81,28 @@ To pack this folder for Agensi, zip `skills/strata-memory` so the archive root c
 
 ## Setup
 
-1. Confirm Python 3.11+, `uv`, and `git`. If one is missing, point the user at that tool's install page and stop.
-2. Ask the user to set `STRATA_API_KEY` or `STRATA_EMBEDDING_API_KEY` themselves when the endpoint requires a key (shell profile, `~/.strata/env`, Claude Desktop's local config, or `~/.hermes/.env`). Do not request the value and do not repeat it. For `local`, or a loopback `STRATA_EMBEDDING_BASE_URL`, skip the key. To leave SiliconFlow, they set `STRATA_EMBEDDING_PROVIDER`, `STRATA_EMBEDDING_BASE_URL`, and `STRATA_EMBEDDING_MODEL` in that same place.
-3. Clone and install:
+1. Confirm Python 3.11+ and `uv`. If one is missing, point the user at that tool's install page and stop. `git` is only needed to develop the server.
+2. The default embedding provider is `local` and needs no API key. Ask the user to set `STRATA_API_KEY` or `STRATA_EMBEDDING_API_KEY` themselves only when they choose a cloud endpoint (shell profile, `~/.strata/env`, Claude Desktop's local config, or `~/.hermes/.env`). Do not request the value and do not repeat it. A loopback `STRATA_EMBEDDING_BASE_URL` also skips the key.
+3. Start the server (no API key) from git:
 
 ```bash
-git clone https://github.com/SherryLi-vc/strata-memory.git
-cd strata-memory
-uv sync
 export STRATA_PALACE="${STRATA_PALACE:-$HOME/.strata/palace}"
-uv run strata-memory-mcp
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp
 ```
 
-4. Register the server with the matching file in `references/`. Replace every `/absolute/path/to/...` placeholder. Leave key fields as environment references or empty until the user fills them on their machine.
+PyPI install (`uvx strata-memory-mcp`) is coming soon. Do not use the PyPI name `strata-memory`.
+
+Or print a host snippet and merge it yourself:
+
+```bash
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host cursor
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host claude-code
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host claude-desktop
+```
+
+`strata-memory-mcp` is the same server, for configs that already call that command.
+
+4. Register the server with the matching file in `references/`. The templates run `uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp` and do not set `STRATA_EMBEDDING_PROVIDER`, so a saved palace provider stays in effect. Add a key field only if the user switches to a cloud embedder. Claude Desktop's file is JSON with no comments.
 5. Call `strata_init` once (`mode` `personal`, or `company` with `tenant_id`). Then call `strata_doctor`. Continue only if `summary.api_key.usable` is true. The same flag is on the check named `embedding_api_key`. The payload never includes the key.
 6. Each session: `recall_context` first, `expand_memory_detail` only for useful ids, `commit_memory` for vetted facts, `promote_session` when scratch notes were confirmed.
 
@@ -113,7 +123,7 @@ Do not run `claude mcp add --env STRATA_API_KEY=<key>`. That copies the secret i
 claude mcp add --scope user --transport stdio strata-memory \
   --env STRATA_API_KEY="${STRATA_API_KEY}" \
   --env "STRATA_PALACE=${STRATA_PALACE:-$HOME/.strata/palace}" \
-  -- uv run --directory /absolute/path/to/strata-memory strata-memory-mcp
+  -- uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp
 ```
 
 ### Cursor
@@ -162,15 +172,17 @@ chmod +x ~/.hermes/scripts/strata-wrapper.sh
 
 The wrapper's later fallbacks are `SILICONFLOW_API_KEY`, a one-line key in `~/.strata/api_key`, and a non-redacted `sk-` value in `~/.openclaw/openclaw.json`. Prefer `STRATA_API_KEY` in `~/.hermes/.env`.
 
-## Tools (11)
+## Tools (13)
 
 | Tool | Use for |
 |------|---------|
 | `strata_init` | Create the palace, SQLite store, and config. Once per deployment. |
 | `commit_memory` | Write one vetted fact. Requires `user_id`, `memory_type`, `fact_claim`, `confidence_score`. |
 | `promote_session` | Move that session's scratch rows to durable memory. Requires `user_id` and `session_id`. |
-| `recall_context` | Hybrid search (vector + SQLite FTS5, RRF). Returns cards, not full text. Requires `user_id` and `query`. |
+| `recall_context` | Ranks every tier, including L0, by relevance to `query`. Honours `limit`. `include_l0` (default true) drops L0 when false. Returns cards, not full text. Requires `user_id` and `query`. |
 | `expand_memory_detail` | Full text for one id from a card. Scope-checked. Requires `user_id` and `memory_id`. |
+| `forget_memory` | Delete by `memory_id`, or by filter (`memory_type`, `layer`, `session_id`, `query`, or `match_all`) with `confirm=true`. Stays inside `user_id` / `tenant_id`. Removes the SQLite row and the vector id so a rebuild cannot restore it. |
+| `export_memories` | JSON export for one `user_id` and tenant. CLI: `strata-memory export --user USER --out memories.json`. |
 | `strata_doctor` | SQLite vs index consistency, plus whether the embedding key is usable. No arguments. |
 | `strata_rebuild_index` | Wipe and rebuild vectors from SQLite. Requires `confirm=true`. Does not delete SQLite. |
 | `strata_stats` | L0–L3 token watermarks. Optional `user_id`. |
@@ -224,9 +236,10 @@ Do not paste the card list back into the prompt as if it were the full memory.
 
 ## Quality Kernel
 
+Secrets: passwords, API keys, tokens, `sk-...`, private keys. By default (`on_secret: "redact"`) they are replaced with `[redacted:<kind>]` before storage and listed in `secrets_redacted`; with `on_secret: "reject"` the write fails with `SECRET_DETECTED`. Do not rely on masking: still leave secrets out of `fact_claim`.
+
 Hard rejects:
 
-- Credentials (`SECRET_DETECTED`): passwords, API keys, tokens, `sk-...`, private keys
 - Emotion with no fact (`EMOTION_ONLY`)
 - Fuzzy time in any claim (`FUZZY_TIME`), including 刚才 / 昨天 / 今天 / yesterday / today / last week / recently
 - Speculative wording only when `memory_type` is `factual_truth` (`SPECULATION_AS_TRUTH`)

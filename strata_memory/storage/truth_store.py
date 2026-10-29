@@ -170,6 +170,31 @@ class TruthStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._scrub_recall_query_audit()
+
+    def _scrub_recall_query_audit(self) -> int:
+        """Remove query text that older versions wrote into recall audit rows (N5).
+
+        ``summary`` used to be ``q=<query[:80]> hits=N tokens~M``. Keep the
+        counters, drop the text, and zero the freed bytes on disk.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, summary FROM audit_log WHERE action='recall_context' AND summary LIKE 'q=%'"
+            ).fetchall()
+            if not rows:
+                return 0
+            conn.execute("PRAGMA secure_delete = ON")
+            for row in rows:
+                summary = row["summary"] or ""
+                _, sep, tail = summary.rpartition(" hits=")
+                conn.execute(
+                    "UPDATE audit_log SET summary=? WHERE id=?",
+                    (f"q=[redacted]{sep}{tail}" if sep else "q=[redacted]", row["id"]),
+                )
+        with self._conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return len(rows)
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -553,13 +578,22 @@ class TruthStore:
         tenant_id: str = "",
         user_id: str,
         limit: int = 20,
+        fts_query: str = "",
     ) -> list[dict[str, Any]]:
-        """Full-text search via FTS5. Returns id + bm25 rank."""
-        # Escape FTS special chars lightly — quote each token
-        tokens = [t for t in query.replace('"', " ").split() if t]
-        if not tokens:
-            return []
-        fts_q = " ".join(f'"{t}"' for t in tokens[:12])
+        """Full-text search via FTS5. Returns id + bm25 rank.
+
+        The default query AND-s quoted tokens (near-duplicate search).
+        ``fts_query`` replaces that, so recall can pass an ``OR`` query and
+        still receive FTS5 ``bm25()`` ranks for the rows that match.
+        """
+        if fts_query.strip():
+            fts_q = fts_query.strip()
+        else:
+            # Escape FTS special chars lightly — quote each token
+            tokens = [t for t in query.replace('"', " ").split() if t]
+            if not tokens:
+                return []
+            fts_q = " ".join(f'"{t}"' for t in tokens[:12])
         safe_limit = max(1, min(int(limit), 100))
         sql = f"""
             SELECT m.*, bm25(memories_fts) AS fts_rank
@@ -654,6 +688,234 @@ class TruthStore:
             "schema_version": SCHEMA_VERSION,
             "db_schema_version": db_ver,
         }
+
+    def _forget_filters(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        memory_id: str = "",
+        memory_type: str = "",
+        layer: str = "",
+        session_id: str = "",
+        query: str = "",
+        match_all: bool = False,
+    ) -> tuple[list[str], list[Any]] | None:
+        parts = ["FROM memories WHERE user_id=? AND tenant_id=?"]
+        params: list[Any] = [user_id, tenant_id or ""]
+        if memory_id:
+            parts.append("AND id=?")
+            params.append(memory_id)
+        else:
+            if memory_type:
+                parts.append("AND memory_type=?")
+                params.append(memory_type)
+            if layer:
+                parts.append("AND layer=?")
+                params.append(layer)
+            if session_id:
+                parts.append("AND session_id=?")
+                params.append(session_id)
+            if query:
+                parts.append("AND instr(lower(fact_claim), ?) > 0")
+                params.append(query.lower())
+            if not any((memory_type, layer, session_id, query, match_all)):
+                return None
+        return parts, params
+
+    def count_memories_for_forget(self, **kwargs: Any) -> int:
+        built = self._forget_filters(**kwargs)
+        if built is None:
+            return 0
+        parts, params = built
+        with self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n " + " ".join(parts), params).fetchone()
+        return int(row["n"])
+
+    def find_memories_for_forget(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        memory_id: str = "",
+        memory_type: str = "",
+        layer: str = "",
+        session_id: str = "",
+        query: str = "",
+        match_all: bool = False,
+        limit: int = 2000,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """One page of rows in this tenant/user scope that a forget call would delete."""
+        built = self._forget_filters(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            memory_id=memory_id,
+            memory_type=memory_type,
+            layer=layer,
+            session_id=session_id,
+            query=query,
+            match_all=match_all,
+        )
+        if built is None:
+            return []
+        parts, params = built
+        safe_limit = max(1, min(int(limit), 2000))
+        safe_offset = max(0, int(offset))
+        sql = "SELECT * " + " ".join(parts) + f" ORDER BY created_at ASC LIMIT {safe_limit} OFFSET {safe_offset}"
+        with self._conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def supersede_chain(self, memory_id: str, *, user_id: str, tenant_id: str = "") -> list[dict[str, Any]]:
+        """The row and every ancestor or successor linked by supersedes_id, inside scope."""
+        seen: set[str] = set()
+        ordered: list[dict[str, Any]] = []
+        stack = [memory_id]
+        while stack:
+            mid = stack.pop()
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            row = self.get_by_id(mid)
+            if not row:
+                continue
+            if row.get("user_id") != user_id or (row.get("tenant_id") or "") != (tenant_id or ""):
+                continue
+            ordered.append(row)
+            for key in ("supersedes_id", "superseded_by"):
+                nxt = row.get(key)
+                if nxt:
+                    stack.append(nxt)
+            with self._conn() as conn:
+                extras = conn.execute(
+                    """SELECT id FROM memories
+                       WHERE user_id=? AND tenant_id=?
+                         AND (supersedes_id=? OR superseded_by=?)""",
+                    (user_id, tenant_id or "", mid, mid),
+                ).fetchall()
+            for extra in extras:
+                stack.append(extra["id"])
+        return ordered
+
+    def delete_ids(self, ids: list[str], *, user_id: str, tenant_id: str = "") -> list[dict[str, Any]]:
+        """Delete these ids when they belong to the scope. FTS rows follow the delete trigger."""
+        if not ids:
+            return []
+        deleted: list[dict[str, Any]] = []
+        with self._conn() as conn:
+            for mid in ids:
+                row = conn.execute(
+                    "SELECT * FROM memories WHERE id=? AND user_id=? AND tenant_id=?",
+                    (mid, user_id, tenant_id or ""),
+                ).fetchone()
+                if not row:
+                    continue
+                deleted.append(dict(row))
+                conn.execute(
+                    "DELETE FROM memories WHERE id=? AND user_id=? AND tenant_id=?",
+                    (mid, user_id, tenant_id or ""),
+                )
+        return deleted
+
+    def redact_audit_for_targets(self, ids: list[str]) -> int:
+        """Keep audit rows for forgotten ids, but drop stored fact text."""
+        if not ids:
+            return 0
+        changed = 0
+        with self._conn() as conn:
+            for mid in ids:
+                cur = conn.execute(
+                    """UPDATE audit_log
+                       SET before_snap='[redacted]',
+                           after_snap='[redacted]',
+                           summary='[redacted] '||action
+                       WHERE target=?""",
+                    (mid,),
+                )
+                changed += cur.rowcount
+        return changed
+
+    def delete_memories(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        memory_id: str = "",
+        memory_type: str = "",
+        layer: str = "",
+        session_id: str = "",
+        query: str = "",
+        match_all: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Delete matching rows. The FTS delete trigger drops the index rows."""
+        matched = self.find_memories_for_forget(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            memory_id=memory_id,
+            memory_type=memory_type,
+            layer=layer,
+            session_id=session_id,
+            query=query,
+            match_all=match_all,
+        )
+        if not matched:
+            return []
+        ids = [row["id"] for row in matched]
+        with self._conn() as conn:
+            for mid in ids:
+                conn.execute(
+                    "DELETE FROM memories WHERE id=? AND user_id=? AND tenant_id=?",
+                    (mid, user_id, tenant_id or ""),
+                )
+        return matched
+
+    def _export_filters(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        session_id: str = "",
+        include_archived: bool = False,
+    ) -> tuple[str, list[Any]]:
+        parts = ["FROM memories WHERE user_id=? AND tenant_id=?"]
+        params: list[Any] = [user_id, tenant_id or ""]
+        if session_id:
+            parts.append("AND session_id=?")
+            params.append(session_id)
+        if not include_archived:
+            parts.append("AND status='active' AND valid_to IS NULL")
+        return " ".join(parts), params
+
+    def count_for_export(self, **kwargs: Any) -> int:
+        where, params = self._export_filters(**kwargs)
+        with self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) AS n " + where, params).fetchone()
+        return int(row["n"])
+
+    def list_for_export(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str = "",
+        session_id: str = "",
+        include_archived: bool = False,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """One page of memories visible to this user and tenant, oldest first."""
+        where, params = self._export_filters(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            include_archived=include_archived,
+        )
+        safe = max(1, min(int(limit or 500), 2000))
+        safe_offset = max(0, int(offset))
+        sql = f"SELECT * {where} ORDER BY created_at ASC LIMIT {safe} OFFSET {safe_offset}"
+        with self._conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
 
     def candidates_for_digest(self, older_than_days: int = 30) -> list[dict[str, Any]]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).replace(microsecond=0).isoformat()

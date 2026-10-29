@@ -289,7 +289,7 @@ def migrate_palace(
         if is_initialized(str(palace)):
             config = load_config(str(palace))
         else:
-            config = Config(palace_path=str(palace), version="2.0.0")
+            config = Config(palace_path=str(palace))
             ensure_palace(palace)
 
     if store is None and not dry_run:
@@ -401,7 +401,7 @@ def migrate_palace(
                             tenant_id=tenant_id,
                             room=room,
                             memory_type=memory_type,
-                            fact_claim=raw[:120],
+                            fact_claim=red.text[:120],
                             content_hash="",
                             status="skipped",
                             reason="SECRET_DETECTED — not migrated",

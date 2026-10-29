@@ -51,9 +51,9 @@ commit_memory
 
 ```
 recall_context
-  → L0 cards (token budget)
-  → session scratch cards
-  → Hybrid RRF: Chroma vector ranks ⊕ FTS5 ranks
+  → candidates: L0 (unless include_l0=false) + this session's scratch + other layers
+  → lexical BM25 over that pool, optionally blended with vector similarity
+  → multi-signal score, then limit, then token budget
   → return [{id, summary, score, layer, type}]  ONLY
 
 expand_memory_detail(id)
@@ -68,7 +68,7 @@ score(d) = Σ 1 / (k + rank_i(d) + 1)   for each ranked list i
 k = 60 (standard)
 ```
 
-Lists: vector similarity order, FTS5 bm25 order. Missing branch → empty list (graceful).
+FTS5 `OR` queries still propose candidates. The score that orders cards is Okapi BM25 over the candidate pool (lexical), blended with vector similarity when an embedding is available, then the multi-signal factors (recency, importance, freshness). A missing vector branch leaves lexical ranking in place.
 
 ## CBT & cooling
 

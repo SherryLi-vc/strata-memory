@@ -2,19 +2,10 @@
   "mcpServers": {
     "strata-memory": {
       "type": "stdio",
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/absolute/path/to/strata-memory",
-        "strata-memory-mcp"
-      ],
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/SherryLi-vc/strata-memory", "strata-memory-mcp"],
       "env": {
-        "STRATA_API_KEY": "${env:STRATA_API_KEY}",
-        "STRATA_PALACE": "${userHome}/.strata/palace",
-        "STRATA_EMBEDDING_PROVIDER": "siliconflow",
-        "STRATA_EMBEDDING_BASE_URL": "https://api.siliconflow.cn/v1",
-        "STRATA_EMBEDDING_MODEL": "BAAI/bge-m3"
+        "STRATA_PALACE": "${userHome}/.strata/palace"
       }
     }
   }

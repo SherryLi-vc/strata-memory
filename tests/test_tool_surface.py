@@ -16,6 +16,8 @@ EXPECTED_TOOLS = [
     "promote_session",
     "recall_context",
     "expand_memory_detail",
+    "forget_memory",
+    "export_memories",
     "strata_doctor",
     "strata_rebuild_index",
     "strata_stats",
@@ -52,7 +54,10 @@ def test_skill_package_is_agensi_shaped():
     assert "https://api.siliconflow.cn" in text
     assert "The configured embedding endpoint receives memory text" in text
     assert "only implemented embedding provider is SiliconFlow" not in text
-    assert "uvx strata-memory-mcp" not in text
+    assert "uvx strata-memory-mcp" in text
+    assert "uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp" in text
+    assert "strata-memory-mcp[local]" in text
+    assert "Do not run `uvx strata-memory`" in text
     assert "github.com/vincy/" not in text
     for tool in EXPECTED_TOOLS:
         assert f"`{tool}`" in text

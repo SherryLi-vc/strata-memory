@@ -18,10 +18,15 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-# Built-in defaults. SiliconFlow is the default option, not the only one.
-DEFAULT_EMBEDDING_PROVIDER = "siliconflow"
+from . import __version__
+from .embedder_stamp import expected_backend, log_effective_embedding
+
+# Built-in defaults. Local (offline, no API key) is the default.
+# SiliconFlow remains available by setting STRATA_EMBEDDING_PROVIDER=siliconflow.
+# A saved config.json that already names a provider is left as-is.
+DEFAULT_EMBEDDING_PROVIDER = "local"
 _PROVIDER_DEFAULTS: dict[str, dict[str, object]] = {
     "siliconflow": {
         "model": "BAAI/bge-m3",
@@ -72,12 +77,18 @@ CATEGORY_DECAY_RATES: dict[str, float] = {
 
 
 class EmbeddingConfig(BaseModel):
-    provider: str = DEFAULT_EMBEDDING_PROVIDER
-    model: str = "BAAI/bge-m3"
+    """Blank model, base URL, and dimension mean "use that provider's defaults".
+
+    A saved config that only sets ``provider`` must not inherit another
+    provider's model name. ``dimension`` 0 means unset.
+    """
+
+    provider: str = ""
+    model: str = ""
     api_key: str = Field(default="", exclude=True)
-    base_url: str = "https://api.siliconflow.cn/v1"
-    dimension: int = 384
-    mode: str = "cloud"  # cloud | local
+    base_url: str = ""
+    dimension: int = 0
+    mode: str = ""  # cloud | local; filled when settings are resolved
 
 
 class CBTConfig(BaseModel):
@@ -96,7 +107,7 @@ class AuditConfig(BaseModel):
 
 class Config(BaseModel):
     palace_path: str = ""
-    version: str = "2.1.0"
+    version: str = __version__
 
     mode: str = "personal"  # personal | company
     tenant_id: str = ""
@@ -117,6 +128,14 @@ class Config(BaseModel):
     promotion_min_usage: int = 5
     l3_demotion_days: int = 30
     min_confidence: float = 0.4  # below → scratch only
+    # What commit_memory does with a detected secret: mask it ("redact") or refuse the write ("reject").
+    # Env override: STRATA_ON_SECRET.
+    on_secret: str = "redact"
+
+    @field_validator("on_secret")
+    @classmethod
+    def _check_on_secret(cls, value: str) -> str:
+        return normalize_on_secret(value)
 
     # Storage backend (2.0)
     storage_backend: str = "sqlite"  # sqlite SoT; chromadb is companion index
@@ -303,10 +322,10 @@ def resolve_embedding_settings(
         model = str(overrides["model"]).strip()
     elif _env_str("STRATA_EMBEDDING_MODEL"):
         model = _env_str("STRATA_EMBEDDING_MODEL")
-    elif switched:
+    elif switched or not (saved.model or "").strip():
         model = str(spec["model"])
     else:
-        model = saved.model or str(spec["model"])
+        model = saved.model
 
     if "base_url" in overrides:
         base_url = str(overrides["base_url"]).strip().rstrip("/")
@@ -314,19 +333,19 @@ def resolve_embedding_settings(
         base_url = _env_str("STRATA_EMBEDDING_BASE_URL").rstrip("/")
     elif provider == "local":
         base_url = ""
-    elif switched:
-        base_url = str(spec["base_url"])
+    elif switched or not (saved.base_url or "").strip():
+        base_url = str(spec["base_url"]).rstrip("/")
     else:
-        base_url = (saved.base_url or str(spec["base_url"])).rstrip("/")
+        base_url = saved.base_url.rstrip("/")
 
     if "dimension" in overrides:
         dimension = int(overrides["dimension"])
     elif _env_str("STRATA_EMBEDDING_DIMENSION"):
         dimension = int(_env_str("STRATA_EMBEDDING_DIMENSION"))
-    elif switched:
+    elif switched or not saved.dimension:
         dimension = int(spec["dimension"])
     else:
-        dimension = int(saved.dimension or spec["dimension"])
+        dimension = int(saved.dimension)
     if dimension < 1:
         raise ValueError("STRATA_EMBEDDING_DIMENSION must be a positive integer.")
 
@@ -345,6 +364,16 @@ def resolve_embedding_settings(
     )
 
 
+ON_SECRET_CHOICES = ("redact", "reject")
+
+
+def normalize_on_secret(value: str) -> str:
+    mode = (value or "").strip().lower()
+    if mode not in ON_SECRET_CHOICES:
+        raise ValueError(f"on_secret must be one of {', '.join(ON_SECRET_CHOICES)}; got {value!r}.")
+    return mode
+
+
 def load_config(palace_path: Optional[str] = None) -> Config:
     palace = Path(palace_path) if palace_path else _default_palace_path()
     cfg_file = _config_path(palace)
@@ -355,12 +384,26 @@ def load_config(palace_path: Optional[str] = None) -> Config:
             raw["version"] = "2.0.0"
         if "storage_backend" not in raw:
             raw["storage_backend"] = "sqlite"
+        embedding_raw = raw.get("embedding")
+        # Palaces saved before the embedding block existed were SiliconFlow.
+        # Do not treat a missing block as the new local default.
+        if not isinstance(embedding_raw, dict) or not embedding_raw:
+            raw["embedding"] = {"provider": "siliconflow"}
         cfg = Config(**{k: v for k, v in raw.items() if k in Config.model_fields})
         cfg.palace_path = str(palace)
     else:
         cfg = Config(palace_path=str(palace))
+    if _env_str("STRATA_ON_SECRET"):
+        cfg.on_secret = normalize_on_secret(_env_str("STRATA_ON_SECRET"))
     # Env overrides provider, model, base URL, dimension, and key when set.
     cfg.embedding = resolve_embedding_settings(cfg.embedding)
+    log_effective_embedding(
+        cfg.embedding.provider,
+        cfg.embedding.model,
+        cfg.embedding.dimension,
+        expected_backend(cfg.embedding.provider, cfg.embedding.model),
+        cfg.embedding.base_url,
+    )
     return cfg
 
 

@@ -13,6 +13,7 @@ from ..config import (
     is_usable_api_key,
     resolve_embedding_settings,
 )
+from ..embedder_stamp import expected_backend, incompatibility, log_effective_embedding, read_stamp
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
 
@@ -67,6 +68,7 @@ def strata_doctor(
                 "model": embedding.model,
                 "base_url": embedding.base_url,
                 "dimension": embedding.dimension,
+                "backend": expected_backend(embedding.provider, embedding.model),
                 "key_required": requires_key,
                 "env_STRATA_API_KEY_set": bool(__import__("os").environ.get("STRATA_API_KEY")),
                 "env_SILICONFLOW_API_KEY_set": bool(__import__("os").environ.get("SILICONFLOW_API_KEY")),
@@ -74,6 +76,45 @@ def strata_doctor(
             },
         }
     )
+    backend = expected_backend(embedding.provider, embedding.model)
+    log_effective_embedding(
+        embedding.provider,
+        embedding.model,
+        embedding.dimension,
+        backend,
+        embedding.base_url,
+    )
+    if chroma is not None:
+        try:
+            stamped_count = chroma.count()
+        except Exception:
+            stamped_count = 0
+        ident = {
+            "provider": embedding.provider,
+            "model": embedding.model,
+            "dimension": embedding.dimension,
+            "backend": backend,
+        }
+        code = incompatibility(chroma.persist_dir, ident, vector_count=stamped_count)
+        stored = read_stamp(chroma.persist_dir)
+        checks.append(
+            {
+                "name": "embedder_stamp",
+                "ok": code is None,
+                "detail": {"stamp": stored, "effective": ident, "code": code},
+            }
+        )
+        if code:
+            issues.append(
+                {
+                    "severity": "error",
+                    "code": code,
+                    "message": (
+                        "Vector index embedder does not match the effective provider and model. "
+                        "Rebuild before recall or commit indexes more vectors."
+                    ),
+                }
+            )
     if requires_key and not is_usable_api_key(resolved):
         issues.append(
             {
@@ -160,17 +201,42 @@ def strata_doctor(
     if durable < 0:
         durable = st.get("active", 0)
 
-    # Drift: more vectors than durable is OK (legacy); zero vectors with many memories → warn
-    if st and durable > 10 and vector_count == 0:
-        issues.append(
-            {
-                "severity": "warn",
-                "code": "INDEX_EMPTY",
-                "message": (
-                    f"Truth Store has ~{durable} durable rows but vector index is empty. Run strata_rebuild_index."
-                ),
-            }
-        )
+    # Coverage: every indexable SoT row should have a vector. A failed or
+    # interrupted rebuild leaves rows without vectors (N8); a stamp without a
+    # collection does too (N9). Count by id, not by total, so orphans or other
+    # tenants' vectors cannot hide missing ones.
+    if chroma is not None and st:
+        try:
+            indexable = [
+                r["id"]
+                for r in store.iter_for_index(tenant_id=config.tenant_id or "")
+                if not r.get("is_negative_schema")
+            ]
+            present = chroma.existing_ids(indexable) if indexable else set()
+            missing = len(indexable) - len(present)
+            checks.append(
+                {
+                    "name": "vector_coverage",
+                    "ok": missing == 0,
+                    "detail": {"indexable_rows": len(indexable), "with_vector": len(present), "missing": missing},
+                }
+            )
+            if missing:
+                issues.append(
+                    {
+                        # No vectors at all means semantic recall is off for every old memory.
+                        "severity": "error" if not present else "warn",
+                        "code": "INDEX_INCOMPLETE",
+                        "message": (
+                            f"{missing} of {len(indexable)} indexable memories have no vector "
+                            "(failed or interrupted rebuild, or index writes that failed). "
+                            "Run strata_rebuild_index(confirm=true)."
+                        ),
+                    }
+                )
+        except Exception as e:
+            issues.append({"severity": "warn", "code": "COVERAGE_CHECK_FAILED", "message": str(e)})
+
     if st and vector_count > durable * 3 + 50:
         issues.append(
             {
@@ -216,8 +282,11 @@ def strata_doctor(
         rec = "Address issues above; prefer strata_rebuild_index for index drift."
 
     return {
-        "status": "ok" if ok else "degraded",
+        # Any issue degrades the report (L1): healthy=false never comes with status=ok.
+        # ``severity`` keeps the distinction between warnings and errors.
+        "status": "ok" if not issues else "degraded",
         "healthy": ok and not issues,
+        "severity": "error" if not ok else ("warn" if issues else "none"),
         "version": config.version,
         "mode": config.mode,
         "checks": checks,
@@ -228,6 +297,13 @@ def strata_doctor(
             "vector_count": vector_count,
             "by_layer": st.get("by_layer", {}) if st else {},
             "api_key": key_stat,
+            "embedding": {
+                "provider": embedding.provider,
+                "model": embedding.model,
+                "dimension": embedding.dimension,
+                "backend": expected_backend(embedding.provider, embedding.model),
+                "base_url": embedding.base_url,
+            },
         },
         "orphan_sample": orphan_sample,
         "missing_sample": missing_sample,

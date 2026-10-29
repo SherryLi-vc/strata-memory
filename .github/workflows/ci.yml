@@ -14,12 +14,12 @@ jobs:
         python-version: ["3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
         with:
-          version: "latest"
+          version: "0.13.6"
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
@@ -34,3 +34,50 @@ jobs:
         run: |
           uv run --python ${{ matrix.python-version }} ruff check .
           uv run --python ${{ matrix.python-version }} ruff format --check .
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: "0.13.6"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build and check metadata
+        run: |
+          uv build
+          uvx twine check dist/*
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        with:
+          version: "0.13.6"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Install wheel into a clean venv
+        run: |
+          uv venv /tmp/clean-venv --python 3.12
+          # Resolve dependencies from the wheel, not uv.lock, so an unpinned mcp cannot hide.
+          uv pip install --python /tmp/clean-venv/bin/python dist/*.whl
+
+      - name: Smoke CLI and MCP handshake
+        run: |
+          /tmp/clean-venv/bin/python -c "from importlib.metadata import version; v=version('mcp'); print('mcp', v); assert int(v.split('.')[0]) < 2"
+          /tmp/clean-venv/bin/strata-memory-mcp --help
+          /tmp/clean-venv/bin/strata-memory-mcp setup --host claude-desktop | /tmp/clean-venv/bin/python -m json.tool >/dev/null
+          /tmp/clean-venv/bin/python scripts/mcp_smoke.py /tmp/clean-venv/bin/strata-memory-mcp

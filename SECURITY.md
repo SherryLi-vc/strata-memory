@@ -29,7 +29,7 @@ Please do NOT open a public issue for security vulnerabilities.
 - **Parameterized SQL**: all queries bound; LIMIT clamped
 - **Path sandbox**: legacy Markdown paths still resolve inside palace
 - **Audit + trajectory**: every tool call logged for post-incident review
-- **Local SoT**: SQLite never leaves the machine. The configured embedding endpoint receives memory text and recall queries unless `STRATA_EMBEDDING_PROVIDER=local` (in-process). SiliconFlow (`BAAI/bge-m3` at `https://api.siliconflow.cn/v1`) is the default. `openai` / `openai_compatible` send the same text to `STRATA_EMBEDDING_BASE_URL`. Loopback base URLs and the local provider do not require an API key.
+- **Local SoT**: SQLite never leaves the machine. The default embedding provider is `local` (in-process hashing, or a semantic model from the `local` extra). It does not send memory text anywhere and does not need an API key. `siliconflow` (`BAAI/bge-m3` at `https://api.siliconflow.cn/v1`), `openai`, and `openai_compatible` send memory text and recall queries to `STRATA_EMBEDDING_BASE_URL`. Loopback base URLs do not require an API key. A saved `config.json` that names a cloud provider keeps that provider.
 
 ## Zero-trust defaults
 

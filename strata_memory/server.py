@@ -1,11 +1,12 @@
-"""Strata Memory MCP Server v2.1.0 — Industrial AI Memory Base.
+"""Strata Memory MCP Server — Industrial AI Memory Base.
 
 Core philosophy: LLM decides; deterministic code executes.
 
-Tool surface (11, intent-aggregated):
+Tool surface (13, intent-aggregated):
   Setup:   strata_init
   Write:   commit_memory, promote_session
   Read:    recall_context, expand_memory_detail
+  Forget:  forget_memory, export_memories
   Ops:     strata_doctor, strata_rebuild_index, strata_stats, strata_project,
            strata_digest, strata_hygiene
 
@@ -33,6 +34,7 @@ from mcp.types import (
     ToolsCapability,
 )
 
+from . import __version__
 from .audit import AuditLogger
 from .config import (
     Config,
@@ -46,6 +48,7 @@ from .config import (
     save_config,
     truth_db_path,
 )
+from .embedder_stamp import expected_backend, log_effective_embedding
 from .embedding import EmbeddingProvider
 from .governance import ToolError, error_payload
 from .ops import (
@@ -58,6 +61,8 @@ from .ops import (
 from .pipeline.commit import commit_memory as pipeline_commit
 from .pipeline.commit import promote_session as pipeline_promote
 from .pipeline.digest import run_digest
+from .pipeline.export_json import export_memories as pipeline_export
+from .pipeline.forget import forget_memories as pipeline_forget
 from .pipeline.recall import expand_memory_detail as pipeline_expand
 from .pipeline.recall import recall_context as pipeline_recall
 from .storage.chroma import ChromaStore
@@ -118,8 +123,9 @@ def _ensure_embed_provider(config: Config) -> Optional[EmbeddingProvider]:
                 "SiliconFlow also reads SILICONFLOW_API_KEY. "
                 "OpenAI and other compatible endpoints also read OPENAI_API_KEY.\n"
                 "Reject keys containing '...'.\n"
-                "For an in-process model: STRATA_EMBEDDING_PROVIDER=local "
-                "and uv sync --extra local.\n"
+                "The default provider is local and needs no API key.\n"
+                "For a semantic in-process model: uv sync --extra local "
+                "(otherwise local uses an offline hashing embedder).\n"
                 "For a local server: STRATA_EMBEDDING_PROVIDER=openai_compatible "
                 "and STRATA_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1 "
                 "(loopback does not require a key).\n"
@@ -145,9 +151,9 @@ def _ensure_embed_provider(config: Config) -> Optional[EmbeddingProvider]:
             fix=(
                 "Check STRATA_EMBEDDING_PROVIDER, STRATA_EMBEDDING_BASE_URL, "
                 "STRATA_EMBEDDING_MODEL, and STRATA_EMBEDDING_DIMENSION. "
+                "Default provider is local (offline hashing, or fastembed with the local extra). "
                 "siliconflow: model BAAI/bge-m3, base_url https://api.siliconflow.cn/v1. "
-                "openai_compatible: any POST /embeddings server. "
-                "local: uv sync --extra local."
+                "openai_compatible: any POST /embeddings server."
             ),
             retry_safe=True,
             fields={"provider": provider, "error": str(e)},
@@ -246,7 +252,7 @@ async def handle_list_tools() -> list[Tool]:
                     "provider": {
                         "type": "string",
                         "description": (
-                            "siliconflow（默认）| openai | openai_compatible | local。"
+                            "local（默认，离线，无需 API key）| siliconflow | openai | openai_compatible。"
                             "省略时用 STRATA_EMBEDDING_PROVIDER。"
                         ),
                     },
@@ -370,8 +376,8 @@ async def handle_list_tools() -> list[Tool]:
         Tool(
             name="recall_context",
             description=_d(
-                "渐进式召回：Hybrid RRF（向量+FTS）返回 {id, summary, score} 卡片，控制 Token。",
-                "新会话开始、需要相关记忆时；默认 deep=L0+检索，shallow=仅核心画像。",
+                "渐进式召回：L0 与其他层按查询相关度打分，返回 {id, summary, score} 卡片，并遵守 limit。",
+                "新会话开始、需要相关记忆时。deep 检索全部层；shallow 只在 L0 与本会话 scratch 中排序。",
                 "禁止把返回结果当作全文；需要细节时必须再调 expand_memory_detail。禁止无 query 的全库倾倒。",
             ),
             inputSchema={
@@ -398,7 +404,15 @@ async def handle_list_tools() -> list[Tool]:
                     "current_turn_only": {
                         "type": "boolean",
                         "default": False,
-                        "description": "true=优先当前 session，抑制跨会话旧话题注入。",
+                        "description": "true=优先当前 session，并且不注入 L0。",
+                    },
+                    "include_l0": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "true=L0（事实/偏好/规程）进入候选并按相关度排序。"
+                            "false=从结果中排除 L0。两种情况都遵守 limit。"
+                        ),
                     },
                 },
                 "required": ["user_id", "query"],
@@ -425,6 +439,73 @@ async def handle_list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="forget_memory",
+            description=_d(
+                "按 id 或过滤条件物理删除记忆，并同步去掉可重建的向量索引，删除后 rebuild 不会复活。",
+                "用户明确要求忘掉一条或一类记忆时。",
+                "禁止跨 user_id / tenant_id。按过滤条件删除必须 confirm=true。禁止用遗忘代替 supersede 版本链。",
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "tenant_id": {"type": "string"},
+                    "memory_id": {
+                        "type": "string",
+                        "description": "删除这一条。与过滤条件二选一。",
+                    },
+                    "memory_type": {"type": "string"},
+                    "layer": {"type": "string"},
+                    "session_id": {
+                        "type": "string",
+                        "description": "只删除该 session_id 的行，不影响其他会话。",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "fact_claim 子串（大小写不敏感），限定在当前 user/tenant 内。",
+                    },
+                    "match_all": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "true=删除该 user/tenant 下全部记忆。必须同时 confirm=true。",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "过滤删除的确认门。按 id 删除不需要。",
+                    },
+                    "include_chain": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "true=连 supersede 版本链一起删除。false=只删命中的行。",
+                    },
+                    "limit": {"type": "integer", "default": 2000, "minimum": 1, "maximum": 2000},
+                    "offset": {"type": "integer", "default": 0, "minimum": 0},
+                },
+                "required": ["user_id"],
+            },
+        ),
+        Tool(
+            name="export_memories",
+            description=_d(
+                "把当前 user/tenant 范围内的记忆导出为 JSON。",
+                "用户要备份、迁移或检查自己的记忆时。",
+                "禁止导出其他 user_id 或 tenant_id 的行。这不是 Markdown 投影；投影仍用 strata_project。",
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "tenant_id": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "include_archived": {"type": "boolean", "default": False},
+                    "limit": {"type": "integer", "default": 500, "minimum": 1, "maximum": 2000},
+                    "offset": {"type": "integer", "default": 0, "minimum": 0},
+                },
+                "required": ["user_id"],
+            },
+        ),
+        Tool(
             name="strata_doctor",
             description=_d(
                 "一键巡检 SQLite SoT 与向量索引一致性（类似 git fsck）。",
@@ -436,8 +517,8 @@ async def handle_list_tools() -> list[Tool]:
         Tool(
             name="strata_rebuild_index",
             description=_d(
-                "清空并从 SQLite 全量重建向量索引（重建级容灾）。",
-                "doctor 报告 INDEX_EMPTY/ORPHANS，或 embedding 模型/维度变更后。",
+                "从 SQLite 重建向量索引。无 tenant_id 重建全部租户；有 tenant_id 只重建该租户，其余保留。",
+                "doctor 报 INDEX_INCOMPLETE/ORPHANS/EMBEDDER_UNSTAMPED、升级后首次使用、或换模型/维度后。",
                 "必须 confirm=true。仅摧毁向量伴生层，绝不删除 SQLite 真相源。禁止在无 API Key 时强行 rebuild。",
             ),
             inputSchema={
@@ -569,6 +650,10 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = await _handle_recall(args)
         elif name == "expand_memory_detail":
             result = _handle_expand(args)
+        elif name == "forget_memory":
+            result = _handle_forget(args)
+        elif name == "export_memories":
+            result = _handle_export(args)
         elif name == "strata_doctor":
             result = _handle_doctor()
         elif name == "strata_rebuild_index":
@@ -589,7 +674,7 @@ async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]:
                 f"Unknown tool: {name}",
                 fix=(
                     "Use one of: strata_init, commit_memory, promote_session, "
-                    "recall_context, expand_memory_detail, strata_doctor, "
+                    "recall_context, expand_memory_detail, forget_memory, export_memories, strata_doctor, "
                     "strata_rebuild_index, strata_stats, strata_project, "
                     "strata_digest, strata_hygiene."
                 ),
@@ -698,7 +783,7 @@ async def _handle_init(args: dict) -> dict:
     config = Config(
         mode=mode,
         tenant_id=tenant_id,
-        version="2.0.0",
+        version=__version__,
         storage_backend="sqlite",
         embedding={
             "provider": provider,
@@ -728,14 +813,24 @@ async def _handle_init(args: dict) -> dict:
     # Eager create SoT
     TruthStore(truth_db_path(palace))
     _reset_state()
+    log_effective_embedding(
+        provider,
+        model,
+        embedding.dimension,
+        expected_backend(provider, model),
+        base_url,
+    )
 
     return {
         "status": "ok",
-        "message": f"Strata Memory 2.0 initialized ({mode} mode).",
-        "version": "2.0.0",
+        "message": f"Strata Memory {__version__} initialized ({mode} mode).",
+        "version": __version__,
         "palace": palace_path,
         "truth_db": str(truth_db_path(palace)),
         "embedding": f"{provider}/{model}",
+        "embedding_provider": provider,
+        "embedding_model": model,
+        "embedding_backend": expected_backend(provider, model),
         "embedding_base_url": base_url,
         "embedding_dimension": embedding.dimension,
         "cbt": cbt_default,
@@ -858,6 +953,7 @@ async def _handle_recall(args: dict) -> dict:
         limit=int(args.get("limit") or 8),
         context_depth=str(args.get("context_depth") or "deep"),
         current_turn_only=bool(args.get("current_turn_only", False)),
+        include_l0=bool(args["include_l0"]) if "include_l0" in args else True,
     )
 
 
@@ -878,6 +974,61 @@ def _handle_expand(args: dict) -> dict:
         tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
         config=config,
     )
+
+
+def _handle_forget(args: dict) -> dict:
+    config, store, _embed, chroma, _auditor = _get_state(require_embed=False)
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    if not args.get("user_id"):
+        return error_payload(
+            "MISSING_PARAMS",
+            "user_id is required.",
+            fix="forget_memory(user_id='...', memory_id='...')",
+        )
+    try:
+        return pipeline_forget(
+            store=store,
+            chroma=chroma,
+            user_id=str(args["user_id"]),
+            tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
+            memory_id=str(args.get("memory_id") or ""),
+            memory_type=str(args.get("memory_type") or ""),
+            layer=str(args.get("layer") or ""),
+            session_id=str(args.get("session_id") or ""),
+            query=str(args.get("query") or ""),
+            match_all=bool(args.get("match_all", False)),
+            confirm=bool(args.get("confirm", False)),
+            include_chain=bool(args["include_chain"]) if "include_chain" in args else True,
+            limit=int(args.get("limit") or 2000),
+            offset=int(args.get("offset") or 0),
+        )
+    except ToolError as exc:
+        return exc.to_dict()
+
+
+def _handle_export(args: dict) -> dict:
+    config, store, *_ = _get_state(require_embed=False)
+    if not is_initialized():
+        return error_payload("NOT_INITIALIZED", "Not initialized.", fix="Run strata_init first.")
+    if not args.get("user_id"):
+        return error_payload(
+            "MISSING_PARAMS",
+            "user_id is required.",
+            fix="export_memories(user_id='...')",
+        )
+    try:
+        return pipeline_export(
+            store=store,
+            user_id=str(args["user_id"]),
+            tenant_id=str(args.get("tenant_id") or config.tenant_id or ""),
+            session_id=str(args.get("session_id") or ""),
+            include_archived=bool(args.get("include_archived", False)),
+            limit=int(args.get("limit") or 500),
+            offset=int(args.get("offset") or 0),
+        )
+    except ToolError as exc:
+        return exc.to_dict()
 
 
 def _handle_doctor() -> dict:
@@ -971,14 +1122,15 @@ def _onboarding_md() -> str:
 
 ## First-time setup
 
-1. Prefer env: `STRATA_API_KEY` or `STRATA_EMBEDDING_API_KEY`, optional `STRATA_PALACE`.
-   Provider defaults to SiliconFlow. Override with `STRATA_EMBEDDING_PROVIDER`,
-   `STRATA_EMBEDDING_BASE_URL`, `STRATA_EMBEDDING_MODEL`, and `STRATA_EMBEDDING_DIMENSION`.
-   `local` stays on-device. Any other endpoint receives memory text.
+1. Optional `STRATA_PALACE`. The embedding provider defaults to `local` (offline, no API key).
+   A semantic model is `uv sync --extra local`; otherwise local uses a hashing embedder.
+   Cloud providers (`siliconflow`, `openai`, `openai_compatible`) need a key and receive memory text.
 2. Call `strata_init(mode="personal")` or company with `tenant_id`
 3. `strata_doctor()` — expect healthy / address warnings
 4. Write: `commit_memory(user_id, memory_type, fact_claim, confidence_score)`
 5. Read: `recall_context` → optional `expand_memory_detail`
+6. Forget: `forget_memory` (id, or filter with confirm=true)
+7. Export: `export_memories` or `strata-memory export`
 
 ## Memory types
 
@@ -1013,7 +1165,7 @@ LLM ──commit_memory──► Quality Kernel ──► CBT Middleware ──�
 LLM ──recall_context──► Hybrid RRF (vector+FTS) ──► {id,summary,score}
 LLM ──expand_memory_detail(id)──► full detail (scope-checked)
 
-Ops: doctor | rebuild_index | stats | project | digest
+Ops: doctor | rebuild_index | stats | project | digest | forget_memory | export_memories
 ```
 
 Principle: **LLM decides; deterministic code owns metadata, TTL, safety, and storage.**
@@ -1040,7 +1192,7 @@ async def run() -> None:
             write_stream,
             InitializationOptions(
                 server_name="strata-memory",
-                server_version="2.0.0",
+                server_version=__version__,
                 capabilities=ServerCapabilities(
                     tools=ToolsCapability(listChanged=None),
                     resources=ResourcesCapability(listChanged=None),
