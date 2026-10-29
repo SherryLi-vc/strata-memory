@@ -2,6 +2,10 @@
 
 ## [2.2.1] — 2026-10-28
 
+### Docs and install
+- README, README.zh-CN, SKILL.md, the `setup --host` snippets and the shipped JSON templates install from git (`uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp`). `uvx strata-memory-mcp` is marked coming soon until the first PyPI release.
+- Tool count is 13 everywhere (README, README.zh-CN, SKILL.md, DEVELOPMENT.md); a test checks the docs against the tools the server registers.
+
 ### Vector index
 - `strata_rebuild_index(tenant_id=...)` deletes and re-adds only that tenant's vectors. It used to reset the whole collection and re-add one tenant, dropping every other tenant's vectors while returning ok. An unstamped or mismatched index escalates a tenant-scoped call to a full rebuild (`scope: "all"`).
 - `strata_doctor` checks vector coverage by id (`vector_coverage`, `INDEX_INCOMPLETE`). After a failed or interrupted rebuild it reports `degraded` instead of healthy.

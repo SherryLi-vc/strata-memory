@@ -3,7 +3,7 @@
     "strata-memory": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["strata-memory-mcp"],
+      "args": ["--from", "git+https://github.com/SherryLi-vc/strata-memory", "strata-memory-mcp"],
       "env": {
         "STRATA_PALACE": "${userHome}/.strata/palace"
       }

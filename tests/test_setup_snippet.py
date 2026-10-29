@@ -1,4 +1,4 @@
-"""Host snippets for uvx strata-memory-mcp do not override a saved embedder."""
+"""Host snippets (uvx from git until PyPI) do not override a saved embedder."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def test_setup_snippet_is_json_and_does_not_pin_provider(host):
     parsed = json.loads(text)
     args = parsed["mcpServers"]["strata-memory"]["args"]
     env = parsed["mcpServers"]["strata-memory"]["env"]
-    assert args == ["strata-memory-mcp"]
+    assert args == ["--from", "git+https://github.com/SherryLi-vc/strata-memory", "strata-memory-mcp"]
     assert "STRATA_EMBEDDING_PROVIDER" not in env
     assert "sk-" not in text
     assert text.strip().startswith("{")

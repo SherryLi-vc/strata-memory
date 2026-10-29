@@ -34,7 +34,7 @@ strata-memory is an open-source MCP memory server (v2.2.1, MIT) for one agent or
 
 Repository: https://github.com/SherryLi-vc/strata-memory
 
-This skill does not bundle the server. The distribution name is `strata-memory-mcp`. Do not run `uvx strata-memory`; that name on PyPI is a different package. After publish: `uvx strata-memory-mcp`. Until then: `uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp`. Semantic weights: `uvx --from 'strata-memory-mcp[local]' strata-memory-mcp`.
+This skill does not bundle the server. The distribution name is `strata-memory-mcp`. Do not run `uvx strata-memory`; that name on PyPI is a different package. Install from git: `uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp`. PyPI install (`uvx strata-memory-mcp`) is coming soon. Semantic weights: `uvx --from 'strata-memory-mcp[local] @ git+https://github.com/SherryLi-vc/strata-memory' strata-memory-mcp`.
 
 ## When to Use
 
@@ -56,7 +56,7 @@ Tell the user this before the first write or recall:
 
 - Rows live under `STRATA_PALACE` (default `~/.strata/palace`).
 - The configured embedding endpoint receives memory text and recall queries (`commit_memory`, `promote_session`, `recall_context`, and index rebuild), unless the provider is `local`.
-- Default is `local`: no API key, text stays on the machine. Without the `local` extra the server uses a hashing embedder. `uvx --from 'strata-memory-mcp[local]' strata-memory-mcp` (or `uv sync --extra local` in a clone) uses `sentence-transformers/all-MiniLM-L6-v2`. The first run downloads weights and needs a network. Offline, set `STRATA_LOCAL_EMBED_BACKEND=hash` instead of waiting on that download. A changed embedder must be rebuilt; the index refuses mixed vectors.
+- Default is `local`: no API key, text stays on the machine. Without the `local` extra the server uses a hashing embedder. `uvx --from 'strata-memory-mcp[local] @ git+https://github.com/SherryLi-vc/strata-memory' strata-memory-mcp` (or `uv sync --extra local` in a clone) uses `sentence-transformers/all-MiniLM-L6-v2`. The first run downloads weights and needs a network. Offline, set `STRATA_LOCAL_EMBED_BACKEND=hash` instead of waiting on that download. A changed embedder must be rebuilt; the index refuses mixed vectors.
 - Optional cloud: provider `siliconflow`, model `BAAI/bge-m3`, base URL `https://api.siliconflow.cn/v1`. That model returns 1024 dimensions and is truncated to `STRATA_EMBEDDING_DIMENSION` (default 384). A saved `config.json` that already names `siliconflow` keeps that provider.
 - `STRATA_EMBEDDING_PROVIDER=openai` or `openai_compatible` calls any OpenAI-compatible `POST /embeddings` endpoint. Set `STRATA_EMBEDDING_BASE_URL` and `STRATA_EMBEDDING_MODEL`. The vector length must equal `STRATA_EMBEDDING_DIMENSION` (OpenAI `text-embedding-3-small` uses 1536 when that provider is selected). Then rebuild the index.
 - `STRATA_EMBEDDING_PROVIDER=local` runs an in-process model (default `sentence-transformers/all-MiniLM-L6-v2`, 384 dimensions). Install with `uv sync --extra local`. Text stays on the machine.
@@ -83,26 +83,26 @@ To pack this folder for Agensi, zip `skills/strata-memory` so the archive root c
 
 1. Confirm Python 3.11+ and `uv`. If one is missing, point the user at that tool's install page and stop. `git` is only needed to develop the server.
 2. The default embedding provider is `local` and needs no API key. Ask the user to set `STRATA_API_KEY` or `STRATA_EMBEDDING_API_KEY` themselves only when they choose a cloud endpoint (shell profile, `~/.strata/env`, Claude Desktop's local config, or `~/.hermes/.env`). Do not request the value and do not repeat it. A loopback `STRATA_EMBEDDING_BASE_URL` also skips the key.
-3. Start the server (no API key). Until the package is on PyPI, use the git form:
+3. Start the server (no API key) from git:
 
 ```bash
 export STRATA_PALACE="${STRATA_PALACE:-$HOME/.strata/palace}"
 uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp
 ```
 
-After it is published, `uvx strata-memory-mcp` is enough. Do not use the PyPI name `strata-memory`.
+PyPI install (`uvx strata-memory-mcp`) is coming soon. Do not use the PyPI name `strata-memory`.
 
 Or print a host snippet and merge it yourself:
 
 ```bash
-uvx strata-memory-mcp setup --host cursor
-uvx strata-memory-mcp setup --host claude-code
-uvx strata-memory-mcp setup --host claude-desktop
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host cursor
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host claude-code
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host claude-desktop
 ```
 
 `strata-memory-mcp` is the same server, for configs that already call that command.
 
-4. Register the server with the matching file in `references/`. The templates run `uvx strata-memory-mcp` and do not set `STRATA_EMBEDDING_PROVIDER`, so a saved palace provider stays in effect. Add a key field only if the user switches to a cloud embedder. Claude Desktop's file is JSON with no comments.
+4. Register the server with the matching file in `references/`. The templates run `uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp` and do not set `STRATA_EMBEDDING_PROVIDER`, so a saved palace provider stays in effect. Add a key field only if the user switches to a cloud embedder. Claude Desktop's file is JSON with no comments.
 5. Call `strata_init` once (`mode` `personal`, or `company` with `tenant_id`). Then call `strata_doctor`. Continue only if `summary.api_key.usable` is true. The same flag is on the check named `embedding_api_key`. The payload never includes the key.
 6. Each session: `recall_context` first, `expand_memory_detail` only for useful ids, `commit_memory` for vetted facts, `promote_session` when scratch notes were confirmed.
 
@@ -123,7 +123,7 @@ Do not run `claude mcp add --env STRATA_API_KEY=<key>`. That copies the secret i
 claude mcp add --scope user --transport stdio strata-memory \
   --env STRATA_API_KEY="${STRATA_API_KEY}" \
   --env "STRATA_PALACE=${STRATA_PALACE:-$HOME/.strata/palace}" \
-  -- uvx strata-memory-mcp
+  -- uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp
 ```
 
 ### Cursor

@@ -7,7 +7,7 @@ download, and need no API key. They match shared tokens, not paraphrases.
 The same idea ships in other local-first memory projects (a blake2 feature
 hash in memoryos, character n-gram hashing in litesearch). Those packages
 are not dependencies here: this is the stdlib version, fixed to the
-configured dimension, so ``uvx strata-memory-mcp`` stays offline by default.
+configured dimension, so the default install stays offline.
 Install the ``local`` extra for a semantic model, then rebuild the index.
 """
 

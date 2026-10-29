@@ -34,25 +34,19 @@ Recall returns a short card. `expand_memory_detail` loads the chain: the new cla
 Python 3.11+ and [uv](https://docs.astral.sh/uv/). No API key. Text stays on the machine.
 
 ```bash
-uvx strata-memory-mcp
-```
-
-The PyPI project name is `strata-memory-mcp`. `strata-memory` on PyPI is a different package. Do not install that name.
-
-Until this package is published, start it from git:
-
-```bash
 uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp
 ```
+
+PyPI install (`uvx strata-memory-mcp`) is coming soon; it does not work until the first release is published. The PyPI project name will be `strata-memory-mcp`. `strata-memory` on PyPI is a different package. Do not install that name.
 
 That starts the MCP server on stdio. Data lives in `STRATA_PALACE` (default `~/.strata/palace`). A new palace defaults to the local embedder. A `config.json` that already names a provider is left alone. Host snippets do not set `STRATA_EMBEDDING_PROVIDER`, because an environment value overrides the saved palace.
 
 Print a snippet for your host and merge it into the existing config. Do not replace the rest of the file.
 
 ```bash
-uvx strata-memory-mcp setup --host cursor
-uvx strata-memory-mcp setup --host claude-code
-uvx strata-memory-mcp setup --host claude-desktop
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host cursor
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host claude-code
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp setup --host claude-desktop
 ```
 
 | Host | Config |
@@ -62,7 +56,7 @@ uvx strata-memory-mcp setup --host claude-desktop
 | Claude Desktop | Settings → Developer → Edit Config |
 | Hermes | `~/.hermes/config.yaml` — see [skills/strata-memory/references/hermes-config.yaml](skills/strata-memory/references/hermes-config.yaml) |
 
-Cursor example (`uvx strata-memory-mcp setup --host cursor`):
+Cursor example (`setup --host cursor`):
 
 ```json
 {
@@ -70,7 +64,7 @@ Cursor example (`uvx strata-memory-mcp setup --host cursor`):
     "strata-memory": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["strata-memory-mcp"],
+      "args": ["--from", "git+https://github.com/SherryLi-vc/strata-memory", "strata-memory-mcp"],
       "env": {
         "STRATA_PALACE": "${userHome}/.strata/palace"
       }
@@ -79,7 +73,7 @@ Cursor example (`uvx strata-memory-mcp setup --host cursor`):
 }
 ```
 
-Claude Desktop's snippet is the same shape and is valid JSON. Desktop does not expand `${VAR}`; edit the palace path in that file if you need to. Before the package is on PyPI, the `args` array can be `["--from", "git+https://github.com/SherryLi-vc/strata-memory", "strata-memory-mcp"]`.
+Claude Desktop's snippet is the same shape and is valid JSON. Desktop does not expand `${VAR}`; edit the palace path in that file if you need to. Once the package is on PyPI (coming soon), `args` can shrink to `["strata-memory-mcp"]`.
 
 Then call `strata_init` once and `strata_doctor`. Both report the effective embedding provider, model, and backend. With the default provider, `summary.api_key.usable` is true because no key is required.
 
@@ -126,7 +120,7 @@ Forget one memory, or a filtered set. A filter does nothing until `confirm` is t
 Export JSON (MCP `export_memories`, or the CLI):
 
 ```bash
-uvx strata-memory-mcp export --user user_001 --out memories.json
+uvx --from git+https://github.com/SherryLi-vc/strata-memory strata-memory-mcp export --user user_001 --out memories.json
 ```
 
 ## What the default embedder is
@@ -136,7 +130,7 @@ uvx strata-memory-mcp export --user user_001 --out memories.json
 For a semantic model:
 
 ```bash
-uvx --from 'strata-memory-mcp[local]' strata-memory-mcp
+uvx --from 'strata-memory-mcp[local] @ git+https://github.com/SherryLi-vc/strata-memory' strata-memory-mcp
 ```
 
 That pulls the optional `local` extra (fastembed / ONNX). The first run downloads `sentence-transformers/all-MiniLM-L6-v2` and needs a network. Offline, that download fails quickly and tells you to set `STRATA_LOCAL_EMBED_BACKEND=hash` (or `STRATA_EMBEDDING_HASH_FALLBACK=1`) instead of hanging. After a successful download the weights stay on the machine. The index stores the embedder identity. A provider or model change refuses vector reads and writes until `strata_rebuild_index(confirm=true)`.
@@ -153,7 +147,7 @@ Cloud endpoints are opt-in. They receive memory text and recall queries.
 
 A `config.json` that already names `siliconflow` keeps that provider. Set `STRATA_EMBEDDING_PROVIDER=local` to switch, then rebuild.
 
-## Tools
+## Tools (13)
 
 | Tool | Use |
 |------|-----|
