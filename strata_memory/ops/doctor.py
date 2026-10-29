@@ -282,8 +282,11 @@ def strata_doctor(
         rec = "Address issues above; prefer strata_rebuild_index for index drift."
 
     return {
-        "status": "ok" if ok else "degraded",
+        # Any issue degrades the report (L1): healthy=false never comes with status=ok.
+        # ``severity`` keeps the distinction between warnings and errors.
+        "status": "ok" if not issues else "degraded",
         "healthy": ok and not issues,
+        "severity": "error" if not ok else ("warn" if issues else "none"),
         "version": config.version,
         "mode": config.mode,
         "checks": checks,

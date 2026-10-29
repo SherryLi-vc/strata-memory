@@ -8,6 +8,7 @@
 
 ### Vector index
 - `strata_rebuild_index(tenant_id=...)` deletes and re-adds only that tenant's vectors. It used to reset the whole collection and re-add one tenant, dropping every other tenant's vectors while returning ok. An unstamped or mismatched index escalates a tenant-scoped call to a full rebuild (`scope: "all"`).
+- `strata_doctor` reports `status: "degraded"` whenever it lists an issue, warnings included, so `healthy: false` never comes with `status: "ok"`. A new `severity` field (`none`, `warn`, `error`) keeps the distinction.
 - `strata_doctor` checks vector coverage by id (`vector_coverage`, `INDEX_INCOMPLETE`). After a failed or interrupted rebuild it reports `degraded` instead of healthy.
 - `recall_context` on an index without an embedder stamp (built before 2.2.1) falls back to lexical recall with `fusion.vector_skipped` and a warning instead of failing with `EMBEDDER_UNSTAMPED`. Run `strata_rebuild_index(confirm=true)` once after upgrading. See "Upgrading from an older version" in the README.
 

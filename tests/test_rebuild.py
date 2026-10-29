@@ -240,3 +240,32 @@ def test_doctor_flags_partially_missing_vectors(tmp_path: Path):
 
     assert report["healthy"] is False
     assert "INDEX_INCOMPLETE" in {issue["code"] for issue in report["issues"]}
+
+
+def test_doctor_status_is_degraded_when_only_warnings(tmp_path: Path):
+    """L1: healthy=false must never come with status=ok."""
+    from strata_memory.ops.doctor import strata_doctor
+
+    cfg, store, chroma, _sizes = _multi_tenant_index(tmp_path)
+    asyncio.run(strata_rebuild_index(config=cfg, store=store, embed_provider=_HashEmbed(), chroma=chroma, confirm=True))
+    clean = strata_doctor(config=cfg, store=store, chroma=chroma)
+    assert (clean["status"], clean["healthy"], clean["severity"]) == ("ok", True, "none")
+
+    chroma.delete_by_ids([store.iter_for_index(tenant_id="t2")[0]["id"]])
+    report = strata_doctor(config=cfg, store=store, chroma=chroma)
+
+    assert {i["severity"] for i in report["issues"]} == {"warn"}
+    assert report["healthy"] is False
+    assert report["status"] == "degraded"
+    assert report["severity"] == "warn"
+
+
+def test_doctor_severity_is_error_when_any_error(tmp_path: Path):
+    from strata_memory.ops.doctor import strata_doctor
+
+    cfg, store, chroma = _legacy_index(tmp_path)
+    asyncio.run(
+        strata_rebuild_index(config=cfg, store=store, embed_provider=_FailingEmbed(), chroma=chroma, confirm=True)
+    )
+    report = strata_doctor(config=cfg, store=store, chroma=chroma)
+    assert (report["status"], report["severity"]) == ("degraded", "error")

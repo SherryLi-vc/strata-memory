@@ -125,7 +125,7 @@ Response shape:
 
 ## strata_doctor
 
-No params. Returns checks + issues + recommendation.
+No params. Returns checks + issues + recommendation. `status` is `ok` only when there are no issues, otherwise `degraded`; `severity` is `none`, `warn` or `error`; `healthy` is true only with no issues.
 
 ---
 
