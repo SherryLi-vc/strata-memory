@@ -16,7 +16,7 @@ compatibility: Requires an MCP host (Claude Code, Cursor, Claude Desktop, or Her
 metadata:
   author: Vincy Zhang
   open_source: https://github.com/SherryLi-vc/strata-memory
-  server_version: "2.2.0"
+  server_version: "2.2.1"
   free: "true"
 ---
 
@@ -24,7 +24,7 @@ metadata:
 
 ## Purpose
 
-strata-memory is an open-source MCP memory server (v2.1.0, MIT) for one agent or several agents sharing a palace.
+strata-memory is an open-source MCP memory server (v2.2.1, MIT) for one agent or several agents sharing a palace.
 
 - SQLite is the single source of truth (memories, audit, trajectories).
 - Chroma is a companion vector index. Rebuild it from SQLite; do not treat it as authoritative.

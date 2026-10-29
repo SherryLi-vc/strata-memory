@@ -136,11 +136,11 @@ uvx --from 'strata-memory-mcp[local]' strata-memory-mcp
 **会存密码或 API key 吗？**  
 Quality Kernel 会拒绝凭据、纯情绪、模糊时间（`yesterday`、`刚才`），以及写成 `factual_truth` 的推测。别的记忆工具也会拒绝或脱敏。这是写入时检查，不是独有能力。
 
-## 2.2.0 的行为变化
+## 2.2 的行为变化
 
 - 新安装默认 `STRATA_EMBEDDING_PROVIDER=local`。`config.json` 里已经写了 `siliconflow` 或其他提供方的，保持原样。
 - `recall_context` 把 L0 和 scratch 放进同一排序，`limit` 作用在这张名单上。`include_l0` 出现在 MCP 参数里（默认 true）。`current_turn_only` 仍然不注入 L0。
-- PyPI 项目名是 `strata-memory`。`strata-memory-mcp` 命令还在。
+- 发行包名是 `strata-memory-mcp`。`uvx strata-memory` 装到的是另一个项目。
 
 ## 从旧版本升级
 

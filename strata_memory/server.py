@@ -1,4 +1,4 @@
-"""Strata Memory MCP Server v2.2.0 — Industrial AI Memory Base.
+"""Strata Memory MCP Server — Industrial AI Memory Base.
 
 Core philosophy: LLM decides; deterministic code executes.
 
@@ -34,6 +34,7 @@ from mcp.types import (
     ToolsCapability,
 )
 
+from . import __version__
 from .audit import AuditLogger
 from .config import (
     Config,
@@ -782,7 +783,7 @@ async def _handle_init(args: dict) -> dict:
     config = Config(
         mode=mode,
         tenant_id=tenant_id,
-        version="2.0.0",
+        version=__version__,
         storage_backend="sqlite",
         embedding={
             "provider": provider,
@@ -822,8 +823,8 @@ async def _handle_init(args: dict) -> dict:
 
     return {
         "status": "ok",
-        "message": f"Strata Memory 2.0 initialized ({mode} mode).",
-        "version": "2.0.0",
+        "message": f"Strata Memory {__version__} initialized ({mode} mode).",
+        "version": __version__,
         "palace": palace_path,
         "truth_db": str(truth_db_path(palace)),
         "embedding": f"{provider}/{model}",
@@ -1191,7 +1192,7 @@ async def run() -> None:
             write_stream,
             InitializationOptions(
                 server_name="strata-memory",
-                server_version="2.2.0",
+                server_version=__version__,
                 capabilities=ServerCapabilities(
                     tools=ToolsCapability(listChanged=None),
                     resources=ResourcesCapability(listChanged=None),

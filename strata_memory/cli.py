@@ -24,7 +24,7 @@ from typing import cast
 
 
 def cmd_init() -> None:
-    print("Strata Memory 2.0 — CLI init")
+    print("Strata Memory — CLI init")
     print("=" * 40)
     mode = input("Mode [personal/company] (default: personal): ").strip() or "personal"
     tenant_id = ""
@@ -34,6 +34,7 @@ def cmd_init() -> None:
     if api_key:
         os.environ["STRATA_API_KEY"] = api_key
 
+    from . import __version__
     from .config import Config, ensure_palace, save_config, truth_db_path
     from .storage.truth_store import TruthStore
 
@@ -42,7 +43,7 @@ def cmd_init() -> None:
         mode=mode,
         tenant_id=tenant_id,
         palace_path=palace_path,
-        version="2.0.0",
+        version=__version__,
         embedding={"api_key": api_key or os.environ.get("STRATA_API_KEY", "")},
         cbt={
             "enabled": mode == "personal",
@@ -58,7 +59,7 @@ def cmd_init() -> None:
         json.dumps(
             {
                 "status": "ok",
-                "version": "2.0.0",
+                "version": __version__,
                 "palace": palace_path,
                 "truth_db": str(truth_db_path(palace)),
                 "mode": mode,

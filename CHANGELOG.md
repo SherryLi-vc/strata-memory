@@ -8,6 +8,8 @@
 - `recall_context` on an index without an embedder stamp (built before 2.2.1) falls back to lexical recall with `fusion.vector_skipped` and a warning instead of failing with `EMBEDDER_UNSTAMPED`. Run `strata_rebuild_index(confirm=true)` once after upgrading. See "Upgrading from an older version" in the README.
 
 ### Packaging
+- One version, 2.2.1, everywhere: `pyproject.toml`, `__version__`, the MCP handshake `server_version`, `strata_init`, the CLI, new configs, and the skill metadata. A test keeps them in sync.
+- `.github/workflows/release.yml` publishes with PyPI Trusted Publishing (OIDC, no stored token): a manual run publishes a `.devN` build to TestPyPI (environment `testpypi`); a published GitHub release whose tag matches the version publishes to PyPI (environment `pypi`). `testpypi.yml` is folded into it.
 - Distribution name stays `strata-memory-mcp`. `strata-memory` on PyPI is a different project.
 - `mcp` is pinned to `>=1.0.0,<2`. mcp 2.x removed `Server.list_tools`.
 - CI installs the wheel into a clean venv with no lockfile and smoke-tests `--help`, `setup`, and an MCP handshake.

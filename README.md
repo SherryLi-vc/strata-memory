@@ -231,7 +231,7 @@ uv run pytest -v
 uv run python scripts/recall_benchmark.py
 ```
 
-Packaging check: `uv build` and `uvx twine check dist/*`. Publishing is a maintainer action. This repo does not contain a PyPI token.
+Packaging check: `uv build` and `uvx twine check dist/*`. Publishing is a maintainer action through PyPI Trusted Publishing (see DEVELOPMENT.md, "Releasing"). This repo does not contain a PyPI token.
 
 Architecture: [docs/architecture.md](docs/architecture.md) · Tools: [docs/tools.md](docs/tools.md) · Security: [SECURITY.md](SECURITY.md) · 中文: [README.zh-CN.md](README.zh-CN.md)
 

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .embedder_stamp import expected_backend, log_effective_embedding
 
 # Built-in defaults. Local (offline, no API key) is the default.
@@ -106,7 +107,7 @@ class AuditConfig(BaseModel):
 
 class Config(BaseModel):
     palace_path: str = ""
-    version: str = "2.2.0"
+    version: str = __version__
 
     mode: str = "personal"  # personal | company
     tenant_id: str = ""
