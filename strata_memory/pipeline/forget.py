@@ -138,14 +138,18 @@ def forget_memories(
 
     ids = [row["id"] for row in deleted]
     store.redact_audit_for_targets(ids)
-    remaining = 0 if memory_id else store.count_memories_for_forget(
-        user_id=user_id,
-        tenant_id=tenant_id,
-        memory_type=memory_type,
-        layer=layer,
-        session_id=session_id,
-        query=query,
-        match_all=match_all,
+    remaining = (
+        0
+        if memory_id
+        else store.count_memories_for_forget(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            memory_type=memory_type,
+            layer=layer,
+            session_id=session_id,
+            query=query,
+            match_all=match_all,
+        )
     )
     index_removed = False
     if chroma is not None and ids:
