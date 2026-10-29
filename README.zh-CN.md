@@ -115,7 +115,7 @@ uvx --from 'strata-memory-mcp[local] @ git+https://github.com/SherryLi-vc/strata
 ## 常见问题
 
 **记忆存在哪？**  
-`STRATA_PALACE` 下的 SQLite。Chroma 是可以重建的索引。`strata_project` 的 Markdown 只是只读视图。
+`STRATA_PALACE` 下的 SQLite。向量索引位于 `l2_vector/vectors.sqlite3`，可从 SQLite 真相源重建。`strata_project` 的 Markdown 只是只读视图。
 
 **会把正文发出去吗？**  
 默认 `local` 不会。云端提供方或非回环的 `STRATA_EMBEDDING_BASE_URL` 会收到正文和查询。

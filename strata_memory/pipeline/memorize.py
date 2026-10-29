@@ -5,7 +5,7 @@ Flow:
   2. Write raw content to Drawer with enhanced YAML frontmatter
      (emotional_salience, context_tags, episode_index, is_negative_schema)
   3. Generate embedding via provider
-  4. Upsert into ChromaDB vector store
+  4. Upsert into SQLite chroma vector store
 
 V2 adds: LLM triple extraction, nightly scoring, CBT detection, audit logging.
 """
@@ -18,14 +18,14 @@ from pathlib import Path
 from ..config import Config
 from ..embedding import EmbeddingProvider
 from ..pipeline.scoring import estimate_emotional_salience
-from ..storage.chroma import ChromaStore, _doc_id
 from ..storage.markdown import drawer_path, write_drawer
+from ..storage.sqlite_vectors import SqliteVectorStore, _doc_id
 
 
 async def memorize(
     config: Config,
     embed_provider: EmbeddingProvider,
-    chroma: ChromaStore,
+    chroma: SqliteVectorStore,
     user_id: str,
     content: str,
     metadata: dict | None = None,
@@ -77,7 +77,7 @@ async def memorize(
     full_text = f"[{wing}/{room}] {content[:2000]}"
     vec = await embed_provider.embed(full_text)
 
-    # 3. Upsert into ChromaDB with enhanced metadata
+    # 3. Upsert into SQLite chroma with enhanced metadata
     doc_id = _doc_id(wing, room, today.isoformat())
     chroma.add(
         documents=[full_text],

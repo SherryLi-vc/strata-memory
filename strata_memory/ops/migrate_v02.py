@@ -627,7 +627,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--rebuild-vectors",
         action="store_true",
-        help="After apply, rebuild Chroma index from SQLite (needs STRATA_API_KEY)",
+        help="After apply, rebuild SQLite chroma index from SQLite (needs STRATA_API_KEY)",
     )
     parser.add_argument(
         "--report",
@@ -653,7 +653,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.rebuild_vectors and args.apply:
         from ..config import load_config as lc
         from ..embedding import EmbeddingProvider
-        from ..storage.chroma import ChromaStore
+        from ..storage.sqlite_vectors import SqliteVectorStore
 
         config = lc(str(palace_path)) if is_initialized(str(palace_path)) else Config(palace_path=str(palace_path))
         if not config.embedding.api_key and not os.environ.get("STRATA_API_KEY"):
@@ -668,7 +668,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             api_key=config.embedding.api_key,
             dimension=config.embedding.dimension,
         )
-        chroma = ChromaStore(palace_path / "l2_vector")
+        chroma = SqliteVectorStore(palace_path / "l2_vector")
 
     report = migrate_palace(
         palace_path,

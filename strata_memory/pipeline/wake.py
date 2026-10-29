@@ -4,7 +4,7 @@ Flow:
   1. Load L0 profile (permanent decontextualized facts, procedures)
   2. Load L1 diary (recent N days, CBT-reframed narratives)
   3. Embed the user's query
-  4. Semantic search ChromaDB for relevant L2 memories
+  4. Semantic search SQLite chroma for relevant L2 memories
   5. Apply defusion for negative schemas (CBT passive mode)
   6. Format results as flat Markdown string
 
@@ -17,8 +17,8 @@ from pathlib import Path
 
 from ..config import Config
 from ..embedding import EmbeddingProvider
-from ..storage.chroma import ChromaStore
 from ..storage.markdown import estimate_tokens, read_l0_profile, read_l1_diary
+from ..storage.sqlite_vectors import SqliteVectorStore
 
 MAX_DOC_CHARS = 1500  # Hard cap per L2 document to prevent context window blowout
 
@@ -26,7 +26,7 @@ MAX_DOC_CHARS = 1500  # Hard cap per L2 document to prevent context window blowo
 async def wake_up(
     config: Config,
     embed_provider: EmbeddingProvider,
-    chroma: ChromaStore,
+    chroma: SqliteVectorStore,
     user_id: str,
     query: str,
     context_depth: str = "shallow",

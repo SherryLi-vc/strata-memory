@@ -12,7 +12,7 @@ from strata_memory.embedder_stamp import identity_dict, incompatibility, write_s
 from strata_memory.governance import ToolError
 from strata_memory.pipeline.commit import commit_memory
 from strata_memory.pipeline.recall import recall_context
-from strata_memory.storage.chroma import ChromaStore
+from strata_memory.storage.sqlite_vectors import SqliteVectorStore
 from strata_memory.storage.truth_store import TruthStore
 
 
@@ -47,7 +47,7 @@ def test_recall_fails_when_the_stamp_does_not_match(tmp_path: Path):
     )
     save_config(cfg)
     store = TruthStore(truth_db_path(palace))
-    chroma = ChromaStore(palace / "l2_vector")
+    chroma = SqliteVectorStore(palace / "l2_vector")
 
     async def setup():
         return await commit_memory(
@@ -106,7 +106,7 @@ def test_recall_on_unstamped_legacy_index_falls_back_to_lexical(tmp_path: Path):
         content_hash="legacy-gw",
         confidence=0.95,
     )
-    chroma = ChromaStore(palace / "l2_vector")
+    chroma = SqliteVectorStore(palace / "l2_vector")
     chroma.add(
         documents=[row["fact_claim"]],
         metadatas=[{"memory_id": row["id"], "user_id": "user_a", "tenant_id": ""}],

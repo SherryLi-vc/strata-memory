@@ -144,7 +144,7 @@ class Config(BaseModel):
         return normalize_on_secret(value)
 
     # Storage backend (2.0)
-    storage_backend: str = "sqlite"  # sqlite SoT; chromadb is companion index
+    storage_backend: str = "sqlite"  # SQLite SoT and rebuildable vector companion
     require_session_scope: bool = False  # company can set True
 
 

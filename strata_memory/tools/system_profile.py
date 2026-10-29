@@ -372,7 +372,7 @@ def apply_memory_config(
 
         server._reset_state()
 
-    # Initialize ChromaDB and SQLite eagerly
+    # Initialize SQLite chroma and SQLite eagerly
     init_results = {}
     dirs = palace_dirs(palace)
     init_results["wings_dir"] = str(dirs["wings"])
@@ -493,7 +493,7 @@ apply_memory_config({
 ```
 
 This writes the config, creates the Palace directory structure, initializes
-ChromaDB + SQLite, creates a welcome drawer, and supports hot reload — no
+SQLite chroma + SQLite, creates a welcome drawer, and supports hot reload — no
 MCP restart needed.
 
 ## Key Principles

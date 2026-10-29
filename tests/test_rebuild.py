@@ -1,4 +1,4 @@
-"""Integration coverage for rebuilding an unstamped, pre-upgrade Chroma index."""
+"""Integration coverage for rebuilding an unstamped, pre-upgrade SQLite chroma index."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from strata_memory.config import Config, ensure_palace, save_config, truth_db_path
 from strata_memory.embedder_stamp import identity_dict, read_stamp, write_stamp
 from strata_memory.ops.rebuild import strata_rebuild_index
-from strata_memory.storage.chroma import ChromaStore
+from strata_memory.storage.sqlite_vectors import SqliteVectorStore
 from strata_memory.storage.truth_store import TruthStore
 
 
@@ -51,7 +51,7 @@ def _legacy_index(tmp_path: Path):
         content_hash="legacy-memory",
         confidence=0.95,
     )
-    chroma = ChromaStore(palace / "l2_vector")
+    chroma = SqliteVectorStore(palace / "l2_vector")
     chroma.add(
         documents=[row["fact_claim"]],
         metadatas=[{"memory_id": row["id"]}],
@@ -133,13 +133,12 @@ def _multi_tenant_index(tmp_path: Path):
                 content_hash=f"h-{tenant}-{i}",
                 confidence=0.9,
             )
-    chroma = ChromaStore(palace / "l2_vector")
+    chroma = SqliteVectorStore(palace / "l2_vector")
     return cfg, store, chroma, sizes
 
 
-def _tenant_vectors(chroma: ChromaStore, tenant: str) -> int:
-    got = chroma.client.get_collection("strata_memory").get(where={"tenant_id": tenant})
-    return len(got["ids"])
+def _tenant_vectors(chroma: SqliteVectorStore, tenant: str) -> int:
+    return chroma.count_where({"tenant_id": tenant})
 
 
 def test_tenant_scoped_rebuild_keeps_other_tenants_vectors(tmp_path: Path):

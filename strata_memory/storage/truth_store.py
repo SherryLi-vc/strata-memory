@@ -2,7 +2,7 @@
 
 Strata Memory 2.0 design law:
   - SQLite is the only authoritative write surface.
-  - ChromaDB / graph indexes are rebuildable companions.
+  - SQLite chroma / graph indexes are rebuildable companions.
   - Markdown is a read-only projection generated from this store.
 
 Scope key (3-axis isolation):

@@ -14,7 +14,7 @@ from ..config import (
     resolve_embedding_settings,
 )
 from ..embedder_stamp import expected_backend, incompatibility, log_effective_embedding, read_stamp
-from ..storage.chroma import ChromaStore
+from ..storage.sqlite_vectors import SqliteVectorStore
 from ..storage.truth_store import TruthStore
 
 
@@ -22,7 +22,7 @@ def strata_doctor(
     *,
     config: Config,
     store: TruthStore,
-    chroma: Optional[ChromaStore] = None,
+    chroma: Optional[SqliteVectorStore] = None,
 ) -> dict[str, Any]:
     issues: list[dict[str, str]] = []
     checks: list[dict[str, Any]] = []

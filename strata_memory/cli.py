@@ -72,24 +72,24 @@ def cmd_init() -> None:
 def cmd_doctor() -> None:
     from .config import load_config, truth_db_path
     from .ops.doctor import strata_doctor
-    from .storage.chroma import ChromaStore
+    from .storage.sqlite_vectors import SqliteVectorStore
     from .storage.truth_store import TruthStore
 
     cfg = load_config()
     store = TruthStore(truth_db_path(Path(cfg.palace_path)))
-    chroma = ChromaStore(Path(cfg.palace_path) / "l2_vector")
+    chroma = SqliteVectorStore(Path(cfg.palace_path) / "l2_vector")
     print(json.dumps(strata_doctor(config=cfg, store=store, chroma=chroma), indent=2, ensure_ascii=False))
 
 
 def cmd_stats() -> None:
     from .config import load_config, truth_db_path
     from .ops.stats import strata_stats
-    from .storage.chroma import ChromaStore
+    from .storage.sqlite_vectors import SqliteVectorStore
     from .storage.truth_store import TruthStore
 
     cfg = load_config()
     store = TruthStore(truth_db_path(Path(cfg.palace_path)))
-    chroma = ChromaStore(Path(cfg.palace_path) / "l2_vector")
+    chroma = SqliteVectorStore(Path(cfg.palace_path) / "l2_vector")
     print(json.dumps(strata_stats(config=cfg, store=store, chroma=chroma), indent=2, ensure_ascii=False))
 
 

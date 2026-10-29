@@ -64,7 +64,7 @@ uv run strata-memory-migrate --palace "$STRATA_PALACE" --apply
 | `--tenant-id ID` | Force tenant on all rows |
 | `--import-secrets` | Try redact+import instead of skip (not recommended) |
 | `--strict-fuzzy` | Do not auto-ground relative time |
-| `--rebuild-vectors` | After apply, full Chroma rebuild from SoT |
+| `--rebuild-vectors` | After apply, full SQLite vector index rebuild from SoT |
 | `--report PATH` | Write JSON summary |
 | `--min-confidence 0.7` | Confidence stamped on migrated rows |
 

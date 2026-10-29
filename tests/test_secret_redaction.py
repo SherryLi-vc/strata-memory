@@ -15,7 +15,7 @@ from strata_memory.config import Config, ensure_palace, load_config, save_config
 from strata_memory.governance import ToolError
 from strata_memory.governance.secrets import find_secrets, redact_secrets
 from strata_memory.pipeline.commit import commit_memory
-from strata_memory.storage.chroma import ChromaStore
+from strata_memory.storage.sqlite_vectors import SqliteVectorStore
 from strata_memory.storage.truth_store import TruthStore
 
 AWS = "AKIA" + "QX7RT2ML9PZ4KD3W"
@@ -84,7 +84,7 @@ def _env(tmp_path: Path, **cfg_kwargs):
     ensure_palace(palace)
     cfg = Config(palace_path=str(palace), mode="personal", **cfg_kwargs)
     save_config(cfg)
-    return cfg, TruthStore(truth_db_path(palace)), ChromaStore(palace / "l2_vector")
+    return cfg, TruthStore(truth_db_path(palace)), SqliteVectorStore(palace / "l2_vector")
 
 
 class _RecordingEmbed:

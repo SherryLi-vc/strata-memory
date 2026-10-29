@@ -1,7 +1,7 @@
 # Strata Memory — Enterprise Deployment (V2 Roadmap)
 #
 # PostgreSQL-backed AuditLog and vector storage are on the V2 roadmap.
-# Currently, company mode uses SQLite for triples/audit and ChromaDB for vectors.
+# Currently, company mode uses SQLite for triples, audit, and vectors.
 # Use this compose file as a starting point for V2 enterprise deployments.
 
 version: '3.9'
