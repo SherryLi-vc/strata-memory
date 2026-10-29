@@ -138,7 +138,15 @@ def forget_memories(
 
     ids = [row["id"] for row in deleted]
     store.redact_audit_for_targets(ids)
-    remaining = 0 if memory_id else max(0, total - start - len(roots))
+    remaining = 0 if memory_id else store.count_memories_for_forget(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        memory_type=memory_type,
+        layer=layer,
+        session_id=session_id,
+        query=query,
+        match_all=match_all,
+    )
     index_removed = False
     if chroma is not None and ids:
         try:
@@ -167,7 +175,9 @@ def forget_memories(
             "offset": 0 if memory_id else start,
             "limit": len(ids) if memory_id else page,
             "remaining": remaining,
-            "next_offset": None if memory_id or not remaining else start + len(roots),
+            # Deleted rows shift later matches toward the beginning. Keep the
+            # cursor at zero so callers following next_offset never skip them.
+            "next_offset": None if memory_id or not remaining else 0,
         },
         message=f"Forgot {len(ids)} memories.",
     )

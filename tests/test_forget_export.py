@@ -260,6 +260,42 @@ def test_export_reports_remaining_pages(env):
     assert page["memories"][0]["id"] != nxt["memories"][0]["id"]
 
 
+def test_forget_pagination_deletes_all_rows_when_following_next_offset(env):
+    _cfg, store, chroma = env
+    for i in range(4100):
+        store.insert_memory(
+            tenant_id="",
+            user_id="user_a",
+            session_id="",
+            memory_type="factual_truth",
+            fact_claim=f"Pagination fixture memory {i}.",
+            content_hash=f"pagination-{i}",
+            confidence=0.9,
+        )
+
+    offset = 0
+    deleted = 0
+    while True:
+        page = forget_memories(
+            store=store,
+            chroma=chroma,
+            user_id="user_a",
+            match_all=True,
+            confirm=True,
+            limit=2000,
+            offset=offset,
+        )
+        assert page["status"] == "ok"
+        deleted += page["deleted_count"]
+        next_offset = page["next_offset"]
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    assert deleted == 4100
+    assert store.count_memories_for_forget(user_id="user_a", tenant_id="", match_all=True) == 0
+
+
 def test_export_is_scoped_json(env):
     cfg, store, _chroma = env
     _commit(

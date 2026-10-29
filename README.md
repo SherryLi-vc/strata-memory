@@ -207,10 +207,9 @@ You selected a cloud provider. Set the key in the host environment, not in chat.
 
 ## Known issues
 
-These are present on main and are not fixed here:
+Known limitation:
 
 - With an empty `tenant_id`, vector recall can return another tenant's rows for the same `user_id`, because that query filters only on `user_id`.
-- `strata_rebuild_index` inside the server process can fail with a readonly Chroma database and leave the vector layer unusable. Rebuild from a fresh process if that happens.
 
 ## Develop
 

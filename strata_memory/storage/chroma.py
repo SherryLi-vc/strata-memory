@@ -92,3 +92,10 @@ class ChromaStore:
         """Return the number of vectors in the store."""
         col = self._collection()
         return col.count()
+
+    def reset(self) -> None:
+        """Replace the index collection without deleting an open persistence directory."""
+        names = self._client.list_collections()
+        if any((item.name if hasattr(item, "name") else str(item)) == "strata_memory" for item in names):
+            self._client.delete_collection(name="strata_memory")
+        self._collection()

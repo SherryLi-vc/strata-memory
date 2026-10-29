@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import shutil
 from typing import Any
 
 from ..config import Config
-from ..embedder_stamp import identity_for, write_stamp
+from ..embedder_stamp import identity_for, stamp_path, write_stamp
 from ..embedding import EmbeddingProvider
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
@@ -39,24 +38,22 @@ async def strata_rebuild_index(
     tenant_id = tenant_id or config.tenant_id or ""
     rows = store.iter_for_index(tenant_id=tenant_id)
     persist = chroma.persist_dir
+    stamp = stamp_path(persist)
 
-    # Close / wipe companion
+    # Invalidate the old identity before replacing vectors. Keep the persistent
+    # client alive and replace its collection instead of deleting its open DB.
     try:
-        # Drop collection by wiping directory
-        if persist.exists():
-            shutil.rmtree(persist)
-        persist.mkdir(parents=True, exist_ok=True)
+        stamp.unlink(missing_ok=True)
+        chroma.reset()
     except Exception as e:
         return {
             "status": "error",
-            "error_code": "WIPE_FAILED",
+            "error_code": "RESET_FAILED",
             "message": str(e),
-            "how_to_fix": "Ensure no other process holds the Chroma lock; retry.",
+            "how_to_fix": "Ensure no other process is writing to the Chroma index, then retry.",
             "retry_safe": True,
         }
 
-    # Re-open store on clean dir
-    new_chroma = ChromaStore(persist)
     ok = 0
     failed = 0
     errors: list[str] = []
@@ -68,7 +65,7 @@ async def strata_rebuild_index(
             claim = row["fact_claim"]
             text = f"[{row['user_id']}/{row.get('room', 'general')}] {claim[:2000]}"
             vec = await embed_provider.embed(text)
-            new_chroma.add(
+            chroma.add(
                 documents=[text],
                 metadatas=[
                     {
@@ -107,12 +104,29 @@ async def strata_rebuild_index(
         tenant_id=tenant_id,
         summary=f"rebuilt ok={ok} failed={failed} source_rows={len(rows)}",
     )
-    ident = identity_for(config.embedding, embed_provider)
-    write_stamp(persist, ident)
     try:
-        vector_count = new_chroma.count()
+        vector_count = chroma.count()
     except Exception:
         vector_count = None
+
+    ident = identity_for(config.embedding, embed_provider)
+    expected = sum(1 for row in rows if not row.get("is_negative_schema"))
+    if failed or ok != expected or vector_count != expected:
+        return {
+            "status": "error",
+            "error_code": "REBUILD_INCOMPLETE",
+            "message": f"Vector index rebuild incomplete: {ok} indexed, {failed} failed (expected {expected}).",
+            "source_rows": len(rows),
+            "indexed": ok,
+            "failed": failed,
+            "errors_sample": errors,
+            "vector_count": vector_count,
+            "embedder": ident,
+            "persist_dir": str(persist),
+            "retry_safe": True,
+        }
+
+    write_stamp(persist, ident)
 
     return {
         "status": "ok",
