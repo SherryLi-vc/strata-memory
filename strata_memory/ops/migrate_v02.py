@@ -401,7 +401,7 @@ def migrate_palace(
                             tenant_id=tenant_id,
                             room=room,
                             memory_type=memory_type,
-                            fact_claim=raw[:120],
+                            fact_claim=red.text[:120],
                             content_hash="",
                             status="skipped",
                             reason="SECRET_DETECTED — not migrated",

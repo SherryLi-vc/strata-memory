@@ -28,11 +28,32 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3)
 
 
-def _card_summary(row: dict[str, Any], cbt: CBTMiddleware, config: Config) -> str:
-    summary = row.get("summary") or (row.get("fact_claim") or "")[:240]
+# Appended to a card summary that was cut short; expand_memory_detail returns the full text.
+TRUNCATION_MARK = " …[truncated]"
+_SUMMARY_FROM_CLAIM = 240
+_SUMMARY_MAX = 400
+
+
+def _card_summary(row: dict[str, Any], cbt: CBTMiddleware, config: Config) -> tuple[str, bool]:
+    """Card summary and whether it was cut short."""
+    claim = row.get("fact_claim") or ""
+    stored = row.get("summary") or ""
+    if stored:
+        # The write path cuts long claims to 237 chars + "..." (or 240 chars after redaction).
+        body = stored.removesuffix("...")
+        truncated = stored != claim and len(claim) > len(body)
+        summary = body if truncated else stored
+    else:
+        summary = claim[:_SUMMARY_FROM_CLAIM]
+        truncated = len(claim) > _SUMMARY_FROM_CLAIM
     if row.get("is_negative_schema") and config.cbt.enabled and config.cbt.mode == "passive":
         summary = cbt.defusion_frame(summary)
-    return summary[:400]
+    limit = _SUMMARY_MAX - len(TRUNCATION_MARK)
+    if len(summary) > _SUMMARY_MAX:
+        summary, truncated = summary[:limit], True
+    if truncated:
+        summary = summary.rstrip() + TRUNCATION_MARK
+    return summary, truncated
 
 
 async def recall_context(
@@ -79,6 +100,8 @@ async def recall_context(
         include_scratch=bool(session_id),
         limit=_CANDIDATE_LIMIT,
     )
+    # Only the newest _CANDIDATE_LIMIT active rows are scanned; say so when there may be more.
+    scan_limit_reached = len(rows) >= _CANDIDATE_LIMIT
     by_id: dict[str, dict[str, Any]] = {row["id"]: row for row in rows}
 
     vector_ids: list[str] = []
@@ -213,9 +236,11 @@ async def recall_context(
         breakdown["lexical"] = round(raw_lex, 4)
         breakdown["why"] = _why_selected(breakdown, row)
         breakdown["final"] = round(final, 4)
+        summary, summary_truncated = _card_summary(row, cbt, config)
         card = {
             "id": row["id"],
-            "summary": _card_summary(row, cbt, config),
+            "summary": summary,
+            "summary_truncated": summary_truncated,
             "memory_type": row["memory_type"],
             "layer": row["layer"],
             "score": round(final, 4),
@@ -234,10 +259,12 @@ async def recall_context(
     max_tokens = config.l0_token_budget if shallow else config.l0_token_budget + config.l2_token_budget
     trimmed: list[dict[str, Any]] = []
     used = 0
+    waterline_dropped = 0
     for card in selected:
         cost = _estimate_tokens(card["summary"])
         if used + cost > max_tokens:
             filter_log.append({"id": card["id"], "reason": "token_waterline"})
+            waterline_dropped += 1
             continue
         trimmed.append(card)
         used += cost
@@ -267,6 +294,16 @@ async def recall_context(
             else "Progressive disclosure: id+summary+score+score_breakdown. Call expand_memory_detail for full detail."
         ),
     }
+    truncation = {
+        "scan_limit": _CANDIDATE_LIMIT,
+        "scan_limit_reached": scan_limit_reached,
+        "token_waterline_dropped": waterline_dropped,
+        "summaries_truncated": sum(1 for card in trimmed if card["summary_truncated"]),
+    }
+    payload["truncated"] = bool(
+        truncation["scan_limit_reached"] or truncation["token_waterline_dropped"] or truncation["summaries_truncated"]
+    )
+    payload["truncation"] = truncation
     if not shallow:
         payload["fusion"] = {
             "vector_hits": len(vector_ids),

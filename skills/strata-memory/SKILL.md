@@ -236,9 +236,10 @@ Do not paste the card list back into the prompt as if it were the full memory.
 
 ## Quality Kernel
 
+Secrets: passwords, API keys, tokens, `sk-...`, private keys. By default (`on_secret: "redact"`) they are replaced with `[redacted:<kind>]` before storage and listed in `secrets_redacted`; with `on_secret: "reject"` the write fails with `SECRET_DETECTED`. Do not rely on masking: still leave secrets out of `fact_claim`.
+
 Hard rejects:
 
-- Credentials (`SECRET_DETECTED`): passwords, API keys, tokens, `sk-...`, private keys
 - Emotion with no fact (`EMOTION_ONLY`)
 - Fuzzy time in any claim (`FUZZY_TIME`), including 刚才 / 昨天 / 今天 / yesterday / today / last week / recently
 - Speculative wording only when `memory_type` is `factual_truth` (`SPECULATION_AS_TRUTH`)

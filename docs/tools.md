@@ -66,7 +66,9 @@ Success:
 }
 ```
 
-Common errors: `SECRET_DETECTED`, `FUZZY_TIME`, `SPECULATION_AS_TRUTH`, `CLAIM_TOO_SHORT`, `LOW_CONFIDENCE` (→ scratch).
+Secrets: with the default `on_secret: "redact"` a detected secret is replaced by `[redacted:<kind>]` before the row is stored or embedded, and the response carries `secrets_redacted` (kind → count; empty when nothing was masked). With `on_secret: "reject"` (config or `STRATA_ON_SECRET`) the write fails with `SECRET_DETECTED`.
+
+Common errors: `SECRET_DETECTED` (only with `on_secret: "reject"`), `FUZZY_TIME`, `SPECULATION_AS_TRUTH`, `CLAIM_TOO_SHORT`, `LOW_CONFIDENCE` (→ scratch).
 
 ---
 
@@ -103,13 +105,23 @@ Response shape:
       "summary": "User prefers dark mode...",
       "memory_type": "user_preference",
       "layer": "L0",
-      "score": 0.62
+      "score": 0.62,
+      "summary_truncated": false
     }
   ],
   "token_estimate": 120,
+  "truncated": false,
+  "truncation": {
+    "scan_limit": 300,
+    "scan_limit_reached": false,
+    "token_waterline_dropped": 0,
+    "summaries_truncated": 0
+  },
   "note": "Call expand_memory_detail for full text."
 }
 ```
+
+A summary that was cut short ends with ` …[truncated]` and has `summary_truncated: true`; `expand_memory_detail` returns the full text. `truncated` is true when any summary was cut, when the token budget dropped cards (`token_waterline_dropped`), or when the scan reached the newest `scan_limit` active rows, so older rows were not considered.
 
 ---
 

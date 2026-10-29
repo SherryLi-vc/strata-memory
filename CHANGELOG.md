@@ -13,6 +13,8 @@
 - `recall_context` on an index without an embedder stamp (built before 2.2.1) falls back to lexical recall with `fusion.vector_skipped` and a warning instead of failing with `EMBEDDER_UNSTAMPED`. Run `strata_rebuild_index(confirm=true)` once after upgrading. See "Upgrading from an older version" in the README.
 
 ### Privacy and isolation
+- Secrets in `commit_memory` are masked by default: a detected secret is replaced with `[redacted:<kind>]` before the row is hashed, stored, embedded or audited, and the response lists `secrets_redacted`. `on_secret: "reject"` in `config.json` (or `STRATA_ON_SECRET=reject`) restores the old refusal with `SECRET_DETECTED`. The rules (`governance/secrets.py`) cover AWS, GitHub, GitLab, Slack, Stripe, Google and `sk-` keys, npm/PyPI tokens, JWTs, private key blocks, passwords, bearer tokens and credentials in URLs. Hygiene previews and migration reports no longer echo a raw secret.
+- `recall_context` marks cut summaries with ` …[truncated]` and `summary_truncated`, and reports `truncated` plus `truncation` (scan limit reached, cards dropped by the token budget, summaries cut).
 - `recall_context` treats an empty `tenant_id` as the default tenant, not a wildcard. Lexical, FTS and vector candidates are all checked against the SQLite row's `tenant_id` and `user_id`; the vector query always filters on `tenant_id`. Previously an empty tenant could return another tenant's rows for the same `user_id`.
 - The `recall_context` audit row stores `q_len`, hit and token counts, not the query text. Older rows written as `q=<text> ...` are rewritten to `q=[redacted] ...` when the store opens, with `secure_delete` and a WAL checkpoint so the text leaves the database files.
 

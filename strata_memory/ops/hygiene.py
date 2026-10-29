@@ -14,6 +14,7 @@ from typing import Any
 
 from ..config import Config
 from ..governance.quality_kernel import SECRET_PATTERNS
+from ..governance.secrets import redact_secrets
 from ..storage.truth_store import TruthStore
 
 
@@ -77,7 +78,7 @@ def strata_hygiene(
                     {
                         "id": r["id"],
                         "memory_type": r["memory_type"],
-                        "preview": text[:80],
+                        "preview": redact_secrets(text)[0][:80],
                     }
                 )
                 break

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import __version__
 from .embedder_stamp import expected_backend, log_effective_embedding
@@ -128,6 +128,14 @@ class Config(BaseModel):
     promotion_min_usage: int = 5
     l3_demotion_days: int = 30
     min_confidence: float = 0.4  # below → scratch only
+    # What commit_memory does with a detected secret: mask it ("redact") or refuse the write ("reject").
+    # Env override: STRATA_ON_SECRET.
+    on_secret: str = "redact"
+
+    @field_validator("on_secret")
+    @classmethod
+    def _check_on_secret(cls, value: str) -> str:
+        return normalize_on_secret(value)
 
     # Storage backend (2.0)
     storage_backend: str = "sqlite"  # sqlite SoT; chromadb is companion index
@@ -356,6 +364,16 @@ def resolve_embedding_settings(
     )
 
 
+ON_SECRET_CHOICES = ("redact", "reject")
+
+
+def normalize_on_secret(value: str) -> str:
+    mode = (value or "").strip().lower()
+    if mode not in ON_SECRET_CHOICES:
+        raise ValueError(f"on_secret must be one of {', '.join(ON_SECRET_CHOICES)}; got {value!r}.")
+    return mode
+
+
 def load_config(palace_path: Optional[str] = None) -> Config:
     palace = Path(palace_path) if palace_path else _default_palace_path()
     cfg_file = _config_path(palace)
@@ -375,6 +393,8 @@ def load_config(palace_path: Optional[str] = None) -> Config:
         cfg.palace_path = str(palace)
     else:
         cfg = Config(palace_path=str(palace))
+    if _env_str("STRATA_ON_SECRET"):
+        cfg.on_secret = normalize_on_secret(_env_str("STRATA_ON_SECRET"))
     # Env overrides provider, model, base URL, dimension, and key when set.
     cfg.embedding = resolve_embedding_settings(cfg.embedding)
     log_effective_embedding(

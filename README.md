@@ -188,7 +188,7 @@ Yes. `forget_memory` by id, or by `memory_type` / `layer` / `session_id` / `quer
 No. You pass a query and a `limit` (1–20). L0 facts, preferences, and procedures are ranked against that query. They are not pinned to the front of the list with a score of 1.
 
 **Will it store a password or an API key?**  
-The quality kernel rejects credentials, emotion-only text, fuzzy times (`yesterday`, `刚才`), and speculation stored as `factual_truth`. Other memory tools also block or redact secrets. This is a write-time check, not a claim that the feature is unique.
+No. By default `commit_memory` masks a detected secret before anything is stored, embedded or audited: `key AKIA…` becomes `key [redacted:aws_access_key_id]`, and the response lists what was masked in `secrets_redacted`. Set `"on_secret": "reject"` in the palace `config.json` (or `STRATA_ON_SECRET=reject`) to refuse such writes with `SECRET_DETECTED` instead. Detection is pattern-based (cloud and API keys, tokens, private keys, JWTs, passwords, credentials in URLs), so it can miss a secret with no recognizable shape. The quality kernel also rejects emotion-only text, fuzzy times (`yesterday`, `刚才`), and speculation stored as `factual_truth`. Other memory tools also block or redact secrets; this is a write-time check, not a claim that the feature is unique.
 
 **The doctor says the key is missing.**  
 You selected a cloud provider. Set the key in the host environment, not in chat. Or switch `STRATA_EMBEDDING_PROVIDER` back to `local`.

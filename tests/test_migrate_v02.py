@@ -103,9 +103,11 @@ def test_apply_imports_and_dedup(palace_v02: Path):
     store = TruthStore(truth_db_path(palace_v02))
     r1 = migrate_palace(palace_v02, dry_run=False, store=store)
     assert r1.imported >= 2
-    assert r1.skipped >= 1  # secret
 
     rows = store.list_active(user_id="alice", limit=50)
+    # The drawer with a password is imported with the password masked, never raw.
+    assert all("hunter2_should_never_store_this_value" not in r["fact_claim"] for r in rows)
+    assert any("[redacted:password]" in r["fact_claim"] for r in rows)
     assert any("dark mode" in r["fact_claim"] for r in rows)
     # L0 profile should land
     assert any(r["layer"] == "L0" for r in rows)

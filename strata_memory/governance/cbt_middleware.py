@@ -13,19 +13,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .secrets import redact_secrets
+
 # Extended distortion patterns (CN + EN)
 DISTORTION_RULES: list[tuple[str, str]] = [
     (r"全搞砸了|彻底完了|永远不行|完全没用|一无是处|catastrophe|ruined everything", "catastrophizing"),
     (r"从来都|每次都|永远不会|总是失败|always fail|never succeed|every single time", "overgeneralization"),
     (r"我就是个?废物|我这个人就|我太(笨|差|烂)|I'?m (worthless|a failure|stupid)", "negative_self_labeling"),
     (r"要么.*要么|不是.*就是|all or nothing|black and white", "black_and_white"),
-]
-
-SECRET_REDACT = [
-    (re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"), "[REDACTED_API_KEY]"),
-    (re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"), "[REDACTED_TOKEN]"),
-    (re.compile(r"(?i)(password|passwd|pwd)\s*[:=]\s*\S+"), r"\1=[REDACTED]"),
-    (re.compile(r"(?i)(api[_-]?key|secret[_-]?key)\s*[:=]\s*\S+"), r"\1=[REDACTED]"),
 ]
 
 
@@ -55,13 +50,8 @@ class CBTMiddleware:
         self._compiled = [(re.compile(pat, re.IGNORECASE), name) for pat, name in DISTORTION_RULES]
 
     def redact(self, text: str) -> RedactionResult:
-        out = text
-        count = 0
-        for pat, repl in SECRET_REDACT:
-            new_out, n = pat.subn(repl, out)
-            if n:
-                count += n
-                out = new_out
+        out, counts = redact_secrets(text)
+        count = sum(counts.values())
         return RedactionResult(text=out, redacted=count > 0, redaction_count=count)
 
     def assess(self, text: str) -> CBTAssessment:

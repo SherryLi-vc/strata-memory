@@ -130,7 +130,7 @@ uvx --from 'strata-memory-mcp[local] @ git+https://github.com/SherryLi-vc/strata
 不会。必须带 query 和 `limit`（1–20）。L0 的事实、偏好、规程按查询排序，不再固定排在最前面、分数也不再恒为 1。
 
 **会存密码或 API key 吗？**  
-Quality Kernel 会拒绝凭据、纯情绪、模糊时间（`yesterday`、`刚才`），以及写成 `factual_truth` 的推测。别的记忆工具也会拒绝或脱敏。这是写入时检查，不是独有能力。
+不会。默认情况下 `commit_memory` 在存储、向量化和写审计之前就把识别到的密钥替换掉：`key AKIA…` 会变成 `key [redacted:aws_access_key_id]`，返回里的 `secrets_redacted` 列出替换了哪些。如果想直接拒绝这类写入，在 palace 的 `config.json` 里设 `"on_secret": "reject"`（或环境变量 `STRATA_ON_SECRET=reject`），会返回 `SECRET_DETECTED`。识别基于规则（云和 API 密钥、token、私钥、JWT、密码、URL 里的凭据），没有明显格式的密钥可能漏掉。Quality Kernel 还会拒绝纯情绪、模糊时间（`yesterday`、`刚才`），以及写成 `factual_truth` 的推测。别的记忆工具也会拒绝或脱敏。这是写入时检查，不是独有能力。
 
 ## 2.2 的行为变化
 

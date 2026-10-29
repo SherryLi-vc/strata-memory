@@ -97,8 +97,10 @@ def test_commit_and_recall_without_vector(env):
     asyncio.run(run())
 
 
-def test_reject_secret_on_commit(env):
+def test_reject_secret_on_commit_when_on_secret_is_reject(env):
+    """Default is on_secret=redact (tests/test_secret_redaction.py); reject keeps the old refusal."""
     cfg, store = env
+    cfg.on_secret = "reject"
 
     async def run():
         from strata_memory.governance import ToolError
