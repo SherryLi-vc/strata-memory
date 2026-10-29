@@ -205,6 +205,16 @@ You selected a cloud provider. Set the key in the host environment, not in chat.
 - `recall_context` ranks L0 and scratch with everything else and applies `limit` to that list. Scores are no longer a constant 1.0. `include_l0` is on the MCP tool (default true). `current_turn_only` still leaves L0 out.
 - The distribution name is `strata-memory-mcp`. `uvx strata-memory` installs a different project.
 
+## Upgrading from an older version
+
+Indexes built before 2.2.1 have no embedder stamp (`l2_vector/embedder.json`). After upgrading:
+
+1. `recall_context` keeps working, but on the lexical path only. The reply carries `fusion.vector_skipped = "EMBEDDER_UNSTAMPED"` and a warning. `commit_memory` still writes to SQLite; it skips the vector until the index is stamped.
+2. Run `strata_rebuild_index` with `confirm=true` once. It re-embeds every active memory from SQLite and writes the stamp. With a cloud provider this re-embeds every row, which costs API calls.
+3. Run `strata_doctor`. `embedder_stamp` and `vector_coverage` should both be ok.
+
+`strata_rebuild_index` without `tenant_id` rebuilds every tenant. With `tenant_id` it deletes and re-adds only that tenant's vectors; other tenants are untouched. If the index is unstamped or was built by another embedder, a tenant-scoped call rebuilds all tenants instead (`scope: "all"`, `escalated_from_tenant`), because the other vectors are unusable anyway. Changing the embedding provider or model still requires a rebuild before vector recall resumes (`EMBEDDER_MISMATCH`).
+
 ## Known issues
 
 Known limitation:

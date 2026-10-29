@@ -20,6 +20,7 @@ from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
 
 _CANDIDATE_LIMIT = 300
+
 _RELEVANCE_FLOOR = 0.05
 
 
@@ -83,6 +84,8 @@ async def recall_context(
     vector_ids: list[str] = []
     fts_ids: list[str] = []
     vector_sim: dict[str, float] = {}
+    vector_skipped = ""
+    warnings: list[str] = []
 
     if not shallow:
         or_query = fts_or_query(query)
@@ -106,40 +109,51 @@ async def recall_context(
                 vector_count = chroma.count()
             except Exception:
                 vector_count = 0
+            probe = None
             if vector_count:
-                probe = await embed_provider.embed(query)
                 ident = identity_for(config.embedding, embed_provider)
                 problem = incompatibility(chroma.persist_dir, ident, vector_count=vector_count)
-                if problem:
+                if problem == "EMBEDDER_UNSTAMPED":
+                    # Index from before stamps existed (upgrade from main). Its
+                    # embedder is unknown, so do not mix vectors; keep recall
+                    # working on the lexical path until a rebuild stamps it.
+                    vector_skipped = problem
+                    warnings.append(
+                        "Vector recall skipped: the index has no embedder stamp (upgraded from an older "
+                        "version). Results are lexical only. Run strata_rebuild_index(confirm=true) once "
+                        "to restore semantic recall."
+                    )
+                elif problem:
                     raise ToolError(
                         problem,
                         mismatch_message(problem, ident),
                         fix=mismatch_fix(),
                         retry_safe=True,
                     )
-            else:
-                probe = None
-            try:
-                qvec = probe if probe is not None else await embed_provider.embed(query)
-                where: dict[str, Any] = {"user_id": user_id}
-                if tenant_id:
-                    where = {"$and": [{"user_id": user_id}, {"tenant_id": tenant_id}]}
-                vres = chroma.query(query_embedding=qvec, top_k=limit * 4, where=where)
-                for hit in vres:
-                    mid = hit.get("id")
-                    if not mid:
-                        continue
-                    vector_ids.append(mid)
-                    distance = float(hit.get("distance") or 0.0)
-                    vector_sim[mid] = max(0.0, min(1.0, 1.0 - distance))
-                    if mid not in by_id:
-                        row = store.get_by_id(mid)
-                        if row:
-                            by_id[mid] = row
-            except ToolError:
-                raise
-            except Exception:
-                vector_ids = []
+                else:
+                    probe = await embed_provider.embed(query)
+            if not vector_skipped:
+                try:
+                    qvec = probe if probe is not None else await embed_provider.embed(query)
+                    where: dict[str, Any] = {"user_id": user_id}
+                    if tenant_id:
+                        where = {"$and": [{"user_id": user_id}, {"tenant_id": tenant_id}]}
+                    vres = chroma.query(query_embedding=qvec, top_k=limit * 4, where=where)
+                    for hit in vres:
+                        mid = hit.get("id")
+                        if not mid:
+                            continue
+                        vector_ids.append(mid)
+                        distance = float(hit.get("distance") or 0.0)
+                        vector_sim[mid] = max(0.0, min(1.0, 1.0 - distance))
+                        if mid not in by_id:
+                            row = store.get_by_id(mid)
+                            if row:
+                                by_id[mid] = row
+                except ToolError:
+                    raise
+                except Exception:
+                    vector_ids = []
 
     candidates: list[dict[str, Any]] = []
     for row in by_id.values():
@@ -254,6 +268,10 @@ async def recall_context(
             "fts_hits": len(fts_ids),
             "rerank": "lexical_bm25+multi_signal_v3",
         }
+        if vector_skipped:
+            payload["fusion"]["vector_skipped"] = vector_skipped
+    if warnings:
+        payload["warnings"] = warnings
     message = (
         f"Shallow recall: {len(trimmed)} cards."
         if shallow

@@ -142,6 +142,16 @@ Quality Kernel 会拒绝凭据、纯情绪、模糊时间（`yesterday`、`刚�
 - `recall_context` 把 L0 和 scratch 放进同一排序，`limit` 作用在这张名单上。`include_l0` 出现在 MCP 参数里（默认 true）。`current_turn_only` 仍然不注入 L0。
 - PyPI 项目名是 `strata-memory`。`strata-memory-mcp` 命令还在。
 
+## 从旧版本升级
+
+2.2.1 之前建的向量索引没有嵌入器标记（`l2_vector/embedder.json`）。升级后：
+
+1. `recall_context` 照常可用，但只走词法召回。返回里有 `fusion.vector_skipped = "EMBEDDER_UNSTAMPED"` 和一条提示。`commit_memory` 照常写 SQLite，在索引打上标记之前不写向量。
+2. 执行一次 `strata_rebuild_index`（`confirm=true`）。它从 SQLite 重新嵌入全部有效记忆并写入标记。用云端提供方时会把每一行重新嵌入一遍，会产生调用费用。
+3. 执行 `strata_doctor`，`embedder_stamp` 和 `vector_coverage` 两项都应为 ok。
+
+`strata_rebuild_index` 不带 `tenant_id` 时重建所有租户。带 `tenant_id` 时只删除并重建该租户的向量，其他租户不动。如果索引没有标记、或由别的嵌入器建成，按租户的调用会改为重建全部租户（返回 `scope: "all"` 和 `escalated_from_tenant`），因为其他租户的向量本来也不能用。更换嵌入提供方或模型后，仍需 rebuild 才能恢复向量召回（`EMBEDDER_MISMATCH`）。
+
 ## 许可
 
 MIT — 见 [LICENSE](LICENSE)

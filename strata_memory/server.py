@@ -516,8 +516,8 @@ async def handle_list_tools() -> list[Tool]:
         Tool(
             name="strata_rebuild_index",
             description=_d(
-                "清空并从 SQLite 全量重建向量索引（重建级容灾）。",
-                "doctor 报告 INDEX_EMPTY/ORPHANS，或 embedding 模型/维度变更后。",
+                "从 SQLite 重建向量索引。无 tenant_id 重建全部租户；有 tenant_id 只重建该租户，其余保留。",
+                "doctor 报 INDEX_INCOMPLETE/ORPHANS/EMBEDDER_UNSTAMPED、升级后首次使用、或换模型/维度后。",
                 "必须 confirm=true。仅摧毁向量伴生层，绝不删除 SQLite 真相源。禁止在无 API Key 时强行 rebuild。",
             ),
             inputSchema={

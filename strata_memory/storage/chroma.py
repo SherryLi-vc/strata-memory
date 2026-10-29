@@ -93,6 +93,29 @@ class ChromaStore:
         col = self._collection()
         return col.count()
 
+    def count_where(self, where: dict) -> int:
+        """Number of vectors whose metadata matches ``where``."""
+        col = self._collection()
+        return len(col.get(where=where, include=[])["ids"])
+
+    def delete_where(self, where: dict) -> int:
+        """Delete vectors whose metadata matches ``where``; return how many were removed."""
+        col = self._collection()
+        ids = col.get(where=where, include=[])["ids"]
+        if ids:
+            col.delete(ids=ids)
+        return len(ids)
+
+    def existing_ids(self, ids: list[str], batch: int = 500) -> set[str]:
+        """Subset of ``ids`` that has a vector in the index."""
+        col = self._collection()
+        found: set[str] = set()
+        for start in range(0, len(ids), batch):
+            chunk = ids[start : start + batch]
+            if chunk:
+                found.update(col.get(ids=chunk, include=[])["ids"])
+        return found
+
     def reset(self) -> None:
         """Replace the index collection without deleting an open persistence directory."""
         names = self._client.list_collections()

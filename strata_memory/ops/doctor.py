@@ -201,17 +201,42 @@ def strata_doctor(
     if durable < 0:
         durable = st.get("active", 0)
 
-    # Drift: more vectors than durable is OK (legacy); zero vectors with many memories → warn
-    if st and durable > 10 and vector_count == 0:
-        issues.append(
-            {
-                "severity": "warn",
-                "code": "INDEX_EMPTY",
-                "message": (
-                    f"Truth Store has ~{durable} durable rows but vector index is empty. Run strata_rebuild_index."
-                ),
-            }
-        )
+    # Coverage: every indexable SoT row should have a vector. A failed or
+    # interrupted rebuild leaves rows without vectors (N8); a stamp without a
+    # collection does too (N9). Count by id, not by total, so orphans or other
+    # tenants' vectors cannot hide missing ones.
+    if chroma is not None and st:
+        try:
+            indexable = [
+                r["id"]
+                for r in store.iter_for_index(tenant_id=config.tenant_id or "")
+                if not r.get("is_negative_schema")
+            ]
+            present = chroma.existing_ids(indexable) if indexable else set()
+            missing = len(indexable) - len(present)
+            checks.append(
+                {
+                    "name": "vector_coverage",
+                    "ok": missing == 0,
+                    "detail": {"indexable_rows": len(indexable), "with_vector": len(present), "missing": missing},
+                }
+            )
+            if missing:
+                issues.append(
+                    {
+                        # No vectors at all means semantic recall is off for every old memory.
+                        "severity": "error" if not present else "warn",
+                        "code": "INDEX_INCOMPLETE",
+                        "message": (
+                            f"{missing} of {len(indexable)} indexable memories have no vector "
+                            "(failed or interrupted rebuild, or index writes that failed). "
+                            "Run strata_rebuild_index(confirm=true)."
+                        ),
+                    }
+                )
+        except Exception as e:
+            issues.append({"severity": "warn", "code": "COVERAGE_CHECK_FAILED", "message": str(e)})
+
     if st and vector_count > durable * 3 + 50:
         issues.append(
             {

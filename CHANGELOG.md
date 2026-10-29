@@ -2,6 +2,11 @@
 
 ## [2.2.1] — 2026-10-28
 
+### Vector index
+- `strata_rebuild_index(tenant_id=...)` deletes and re-adds only that tenant's vectors. It used to reset the whole collection and re-add one tenant, dropping every other tenant's vectors while returning ok. An unstamped or mismatched index escalates a tenant-scoped call to a full rebuild (`scope: "all"`).
+- `strata_doctor` checks vector coverage by id (`vector_coverage`, `INDEX_INCOMPLETE`). After a failed or interrupted rebuild it reports `degraded` instead of healthy.
+- `recall_context` on an index without an embedder stamp (built before 2.2.1) falls back to lexical recall with `fusion.vector_skipped` and a warning instead of failing with `EMBEDDER_UNSTAMPED`. Run `strata_rebuild_index(confirm=true)` once after upgrading. See "Upgrading from an older version" in the README.
+
 ### Packaging
 - Distribution name stays `strata-memory-mcp`. `strata-memory` on PyPI is a different project.
 - `mcp` is pinned to `>=1.0.0,<2`. mcp 2.x removed `Server.list_tools`.

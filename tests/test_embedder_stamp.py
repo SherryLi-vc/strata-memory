@@ -82,3 +82,51 @@ def test_recall_fails_when_the_stamp_does_not_match(tmp_path: Path):
     with pytest.raises(ToolError) as raised:
         asyncio.run(ask())
     assert raised.value.code == "EMBEDDER_MISMATCH"
+
+
+def test_recall_on_unstamped_legacy_index_falls_back_to_lexical(tmp_path: Path):
+    """Upgrading from main leaves vectors without a stamp. Recall must keep working (lexical) until rebuild."""
+    palace = tmp_path / "palace"
+    ensure_palace(palace)
+    cfg = Config(
+        palace_path=str(palace),
+        mode="personal",
+        version="2.2.1",
+        embedding={"provider": "local", "model": "hashing", "dimension": 4, "mode": "local"},
+        cbt={"enabled": False, "mode": "off", "cooling_hours": 48, "detect_distortions": False},
+    )
+    save_config(cfg)
+    store = TruthStore(truth_db_path(palace))
+    row = store.insert_memory(
+        tenant_id="",
+        user_id="user_a",
+        session_id="",
+        memory_type="factual_truth",
+        fact_claim="The API gateway listens on port 8017 in production.",
+        content_hash="legacy-gw",
+        confidence=0.95,
+    )
+    chroma = ChromaStore(palace / "l2_vector")
+    chroma.add(
+        documents=[row["fact_claim"]],
+        metadatas=[{"memory_id": row["id"], "user_id": "user_a", "tenant_id": ""}],
+        ids=[row["id"]],
+        embeddings=[[0.1, 0.2, 0.3, 0.4]],
+    )
+
+    out = asyncio.run(
+        recall_context(
+            config=cfg,
+            store=store,
+            embed_provider=_HashEmbed(),
+            chroma=chroma,
+            user_id="user_a",
+            query="API gateway port",
+        )
+    )
+
+    assert out["status"] == "ok"
+    assert [hit["id"] for hit in out["hits"]] == [row["id"]]
+    assert out["fusion"]["vector_hits"] == 0
+    assert out["fusion"]["vector_skipped"] == "EMBEDDER_UNSTAMPED"
+    assert "strata_rebuild_index" in out["warnings"][0]
