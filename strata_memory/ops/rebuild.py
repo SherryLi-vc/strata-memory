@@ -10,6 +10,43 @@ from ..embedding import EmbeddingProvider
 from ..storage.chroma import ChromaStore
 from ..storage.truth_store import TruthStore
 
+# Chroma and the embedding providers both accept lists; cap each request to keep
+# memory use bounded during large rebuilds.
+REBUILD_BATCH_SIZE = 128
+
+
+def _rebuild_item(row: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
+    claim = row["fact_claim"]
+    text = f"[{row['user_id']}/{row.get('room', 'general')}] {claim[:2000]}"
+    metadata = {
+        "memory_id": row["id"],
+        "tenant_id": row.get("tenant_id") or "",
+        "user_id": row["user_id"],
+        "session_id": row.get("session_id") or "",
+        "memory_type": row["memory_type"],
+        "layer": row["layer"],
+        "room": row.get("room") or "general",
+        "wing": f"users/{row['user_id']}",
+        "category": {
+            "factual_truth": "fact",
+            "user_preference": "preference",
+            "procedure_rule": "procedure",
+            "episodic_event": "event",
+        }.get(row["memory_type"], "fact"),
+        "date": (row.get("created_at") or "")[:10],
+        "is_negative_schema": False,
+        "context_tags": "",
+        "confidence": row.get("confidence") or 0.5,
+        "importance": row.get("importance") or 0.5,
+    }
+    return text, metadata, row["id"]
+
+
+async def _write_row(row: dict[str, Any], embed_provider: EmbeddingProvider, chroma: ChromaStore) -> None:
+    text, metadata, row_id = _rebuild_item(row)
+    vec = await embed_provider.embed(text)
+    chroma.add(documents=[text], metadatas=[metadata], ids=[row_id], embeddings=[vec])
+
 
 async def strata_rebuild_index(
     *,
@@ -94,46 +131,33 @@ async def strata_rebuild_index(
     failed = 0
     errors: list[str] = []
 
-    for row in rows:
-        if row.get("is_negative_schema"):
-            continue  # keep negative schemas out of hot index
+    eligible_rows = [row for row in rows if not row.get("is_negative_schema")]
+    for start in range(0, len(eligible_rows), REBUILD_BATCH_SIZE):
+        chunk = eligible_rows[start : start + REBUILD_BATCH_SIZE]
         try:
-            claim = row["fact_claim"]
-            text = f"[{row['user_id']}/{row.get('room', 'general')}] {claim[:2000]}"
-            vec = await embed_provider.embed(text)
+            items = [_rebuild_item(row) for row in chunk]
+            texts = [item[0] for item in items]
+            metadatas = [item[1] for item in items]
+            ids = [item[2] for item in items]
+            embeddings = await embed_provider.embed_batch(texts)
             chroma.add(
-                documents=[text],
-                metadatas=[
-                    {
-                        "memory_id": row["id"],
-                        "tenant_id": row.get("tenant_id") or "",
-                        "user_id": row["user_id"],
-                        "session_id": row.get("session_id") or "",
-                        "memory_type": row["memory_type"],
-                        "layer": row["layer"],
-                        "room": row.get("room") or "general",
-                        "wing": f"users/{row['user_id']}",
-                        "category": {
-                            "factual_truth": "fact",
-                            "user_preference": "preference",
-                            "procedure_rule": "procedure",
-                            "episodic_event": "event",
-                        }.get(row["memory_type"], "fact"),
-                        "date": (row.get("created_at") or "")[:10],
-                        "is_negative_schema": False,
-                        "context_tags": "",
-                        "confidence": row.get("confidence") or 0.5,
-                        "importance": row.get("importance") or 0.5,
-                    }
-                ],
-                ids=[row["id"]],
-                embeddings=[vec],
+                documents=texts,
+                metadatas=metadatas,
+                ids=ids,
+                embeddings=embeddings,
             )
-            ok += 1
-        except Exception as e:
-            failed += 1
-            if len(errors) < 5:
-                errors.append(f"{row['id']}: {e}")
+            ok += len(chunk)
+        except Exception:
+            # Retry only the affected chunk individually so one bad record does
+            # not prevent healthy records elsewhere from using the batch path.
+            for row in chunk:
+                try:
+                    await _write_row(row, embed_provider, chroma)
+                    ok += 1
+                except Exception as e:
+                    failed += 1
+                    if len(errors) < 5:
+                        errors.append(f"{row['id']}: {e}")
 
     store.audit(
         "strata_rebuild_index",
