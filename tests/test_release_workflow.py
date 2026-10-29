@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -61,3 +62,25 @@ def test_workflow_has_no_secrets():
 def test_release_tag_must_match_package_version(tag: str, ok: bool):
     errors = check(ROOT, tag)
     assert (errors == []) is ok, errors
+
+
+_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*(\S+?)@(\S+)\s*(#.*)?$")
+
+
+@pytest.mark.parametrize("workflow", sorted((ROOT / ".github/workflows").glob("*.yml")), ids=lambda p: p.name)
+def test_actions_are_pinned_to_commit_shas_with_version_comment(workflow: Path):
+    refs = []
+    for line in workflow.read_text(encoding="utf-8").splitlines():
+        m = _USES.match(line)
+        if m:
+            refs.append(m.groups())
+    assert refs, f"no uses: in {workflow.name}"
+    for action, ref, comment in refs:
+        assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{action}@{ref} is not pinned to a commit SHA"
+        assert comment and re.search(r"v\d+\.\d+\.\d+", comment), f"{action} needs a '# vX.Y.Z' comment"
+
+
+@pytest.mark.parametrize("workflow", sorted((ROOT / ".github/workflows").glob("*.yml")), ids=lambda p: p.name)
+def test_uv_version_is_pinned(workflow: Path):
+    text = workflow.read_text(encoding="utf-8")
+    assert 'version: "latest"' not in text
