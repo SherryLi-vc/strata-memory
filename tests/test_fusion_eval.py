@@ -80,8 +80,10 @@ def test_fusion_weights_change_ranking_order():
     vectors = {"lexical": 0.1, "semantic": 0.95}
     low_vector = Config(fusion={"lexical_weight": 0.75, "vector_weight": 0.25})
     high_vector = Config(fusion={"lexical_weight": 0.25, "vector_weight": 0.75})
+
     def order(cfg: Config) -> list[str]:
         return sorted(lexical, key=lambda item: -_hybrid_relevance(lexical[item], vectors[item], cfg))
+
     assert order(low_vector)[0] == "lexical"
     assert order(high_vector)[0] == "semantic"
     assert _hybrid_relevance(0.0, 1.0, low_vector) == 0.25
