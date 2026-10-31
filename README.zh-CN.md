@@ -16,7 +16,7 @@
 
 事实变化时，旧行不会被覆盖。旧记忆归档，并用 `supersedes_id` / `superseded_by` 串成版本链。`decision_record` 留下决定、日期，以及它取代了什么。之后的会话可以解释「为什么现在这条才算数」。
 
-英文文档是 [README.md](README.md)。下面是同一版本的中文说明。
+[English](README.md) · **简体中文**
 
 ## 快速开始
 
