@@ -12,6 +12,8 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-blue)](https://modelcontextprotocol.org)
 
+English · [简体中文](README.zh-CN.md)
+
 **It remembers why you decided.**
 
 When a fact changes, strata does not overwrite the row. The previous memory is archived and linked (`supersedes_id` / `superseded_by`). A `decision_record` keeps the choice, the date, and what it replaced, so a later session can explain why the current fact is the current fact.
